@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE TABLE IF NOT EXISTS items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type report_type NOT NULL,
+    type VARCHAR(50) NOT NULL,
     category VARCHAR(50) NOT NULL,
     brand VARCHAR(50),
     model VARCHAR(50),
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS items (
     incident_timestamp TIMESTAMPTZ NOT NULL,
     text_embedding vector(384),
     sanitized_media_url TEXT,
-    status report_status DEFAULT 'active',
+    status VARCHAR(50) DEFAULT 'active',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

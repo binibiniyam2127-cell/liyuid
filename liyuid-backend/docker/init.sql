@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS items (
     model VARCHAR(50),
     primary_color VARCHAR(30) NOT NULL,
     public_description TEXT NOT NULL,
+    challenge_type VARCHAR(100),
+    challenge_question TEXT,
     private_challenge_truth TEXT NOT NULL,
     location GEOMETRY(Point, 4326) NOT NULL,
     incident_timestamp TIMESTAMPTZ NOT NULL,

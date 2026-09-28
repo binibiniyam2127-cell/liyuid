@@ -35,7 +35,7 @@ Base.metadata.create_all(bind=engine)
 
 # Security Configuration (Argon2id + JWT)
 pwd_context = PasswordHash.recommended()
-SECRET_KEY = os.getenv("SECRET_KEY", "LIYUID_SUPER_SECRET_KEY_FOR_LOCAL_DEV_CHANGE_IN_PROD")
+SECRET_KEY = os.getenv("SECRET_KEY") or "ci_testing_secret_key_liyuid_super_secure_32bytes!"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 

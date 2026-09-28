@@ -41,9 +41,9 @@ jobs:
 
       - name: Build and Start Compose Services
         run: |
+          docker compose down -v
           docker compose up -d --build
           docker compose ps
-
       - name: Wait for FastAPI & PostgreSQL to be Ready
         run: |
           echo "Waiting for services to become healthy..."

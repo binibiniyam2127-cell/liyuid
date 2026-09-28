@@ -10,6 +10,13 @@ jobs:
   e2e-test:
     runs-on: ubuntu-latest
 
+    env:
+      SECRET_KEY: "ci_testing_secret_key_liyuid_super_secure_32bytes!"
+      ALGORITHM: "HS256"
+      POSTGRES_USER: "liyuid_admin"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DB: "liyuid_db"
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4

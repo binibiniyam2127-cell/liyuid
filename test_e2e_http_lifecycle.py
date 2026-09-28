@@ -28,23 +28,33 @@ def make_request(path: str, method: str = "GET", data: dict = None, token: str =
             return exc.code, {"error": err_body}
 
 def authenticate_user(email: str, password: str = "SecurePass123!") -> str:
+    # 1. Register user
     reg_payload = {"email": email, "password": password, "full_name": email.split("@")[0].title()}
     make_request("/auth/register", method="POST", data=reg_payload)
 
-    login_payload = {"email": email, "password": password}
-    code, res = make_request("/auth/token", method="POST", data=login_payload)
-    if code != 200 or "access_token" not in res:
-        url = f"{BASE_URL}/auth/token"
-        form_data = f"username={email}&password={password}".encode("utf-8")
-        req = urllib.request.Request(url, data=form_data, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            raise RuntimeError(f"Failed to authenticate {email}: {e}")
+    # 2. Request OAuth2 password bearer token directly using form-urlencoded body
+    url = f"{BASE_URL}/auth/token"
+    form_data = urllib.parse.urlencode({
+        "username": email,
+        "password": password
+    }).encode("utf-8")
 
-    return res["access_token"]
+    req = urllib.request.Request(
+        url,
+        data=form_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST"
+    )
 
+    try:
+        with urllib.request.urlopen(req) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res["access_token"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Failed to authenticate {email}: HTTP {e.code} - {body}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to authenticate {email}: {e}")
 def run_e2e_test():
     print("==================================================================")
     print("      LIYUID END-TO-END HTTP INTEGRATION TEST (FASTAPI GATEWAY)   ")

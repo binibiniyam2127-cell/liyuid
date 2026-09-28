@@ -15,6 +15,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      - ./liyuid-backend/docker/init.sql:/docker-entrypoint-initdb.d/02_schema.sql:ro
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-liyuid_admin} -d ${POSTGRES_DB:-liyuid_db}"]

@@ -1,0 +1,57 @@
+﻿name: Liyuid E2E Integration Suite
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Start Compose Services
+        run: |
+          docker compose up -d --build
+          docker compose ps
+
+      - name: Wait for FastAPI & PostgreSQL to be Ready
+        run: |
+          echo "Waiting for services to become healthy..."
+          timeout 90 bash -c 'until curl -s -f http://localhost:8000/docs > /dev/null; do sleep 3; done'
+          echo "FastAPI Gateway is ready and responding!"
+
+      - name: Set up Python Runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Full Lifecycle E2E Integration Test
+        run: |
+          python test_e2e_http_lifecycle.py
+
+      - name: Verify Audit Trail Records in PostgreSQL
+        run: |
+          docker compose exec -T postgres psql -U liyuid_admin -d liyuid_db -c "
+          SELECT action, severity, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 5;
+          "
+
+      - name: Dump Logs on Failure
+        if: failure()
+        run: |
+          echo "=== Backend Logs ==="
+          docker compose logs --tail=100 backend
+          echo "=== Celery Worker Logs ==="
+          docker compose logs --tail=100 worker
+
+      - name: Clean Up Containers and Volumes
+        if: always()
+        run: |
+          docker compose down -v

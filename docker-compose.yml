@@ -1,0 +1,120 @@
+services:
+  # -------------------------------------------------------------
+  # 1. Custom Database with PostGIS & pgvector
+  # -------------------------------------------------------------
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    container_name: liyuid_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-liyuid_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-liyuid_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-liyuid_admin} -d ${POSTGRES_DB:-liyuid_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - liyuid_net
+
+  # -------------------------------------------------------------
+  # 2. Redis Message Broker & Celery Queue
+  # -------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: liyuid_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - liyuid_net
+
+  # -------------------------------------------------------------
+  # 3. FastAPI Core Backend Service
+  # -------------------------------------------------------------
+  backend:
+    build:
+      context: ./liyuid-backend
+      dockerfile: Dockerfile
+    container_name: liyuid_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-liyuid_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-liyuid_db}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-liyuid_admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-liyuid_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      - DISABLE_SQLALCHEMY_CEXT=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - liyuid_net
+
+  # -------------------------------------------------------------
+  # 4. Celery AI Processing Worker (Embeddings, Redaction, Alerts)
+  # -------------------------------------------------------------
+  worker:
+    build:
+      context: ./liyuid-ai-worker
+      dockerfile: Dockerfile
+    container_name: liyuid_worker
+    restart: unless-stopped
+    volumes:
+      - uploads_data:/app/uploads
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-liyuid_admin}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-liyuid_db}
+      - REDIS_URL=redis://redis:6379/0
+      - NOTIFICATION_SCORE_THRESHOLD=${NOTIFICATION_SCORE_THRESHOLD:-0.75}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - SMS_PROVIDER=${SMS_PROVIDER:-mock}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_FROM_NUMBER=${TWILIO_FROM_NUMBER}
+      - AFROMESSAGE_API_TOKEN=${AFROMESSAGE_API_TOKEN}
+      - AFROMESSAGE_SENDER_ID=${AFROMESSAGE_SENDER_ID:-LIYUID}
+      - DISABLE_SQLALCHEMY_CEXT=1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - liyuid_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  liyuid_net:
+    driver: bridge

@@ -1,0 +1,11 @@
+FROM postgis/postgis:16-3.4
+
+# Install pgvector directly into the official PostGIS image
+RUN apt-get update && \
+    apt-get install -y postgresql-16-pgvector && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add an init script so extensions are automatically created on database creation
+RUN mkdir -p /docker-entrypoint-initdb.d && \
+    echo "CREATE EXTENSION IF NOT EXISTS postgis;" > /docker-entrypoint-initdb.d/01_init.sql && \
+    echo "CREATE EXTENSION IF NOT EXISTS vector;" >> /docker-entrypoint-initdb.d/01_init.sql

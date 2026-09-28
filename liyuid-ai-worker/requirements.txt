@@ -1,0 +1,13 @@
+celery>=5.4.0
+redis>=5.0.0
+sentence-transformers>=3.0.0
+pytesseract>=0.3.10
+pillow>=10.3.0
+psycopg[binary]>=3.1.18
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.0
+pgvector>=0.2.5
+geoalchemy2>=0.14.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+requests>=2.31.0

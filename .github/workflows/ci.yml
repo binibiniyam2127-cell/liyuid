@@ -1,0 +1,49 @@
+name: Liyuid Test & Privacy CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: liyuid_admin
+          POSTGRES_PASSWORD: liyuid_password
+          POSTGRES_DB: liyuid_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pyotp
+
+    - name: Run Pytest Suite
+      env:
+        DATABASE_URL: postgresql://liyuid_admin:liyuid_password@localhost:5432/liyuid_db
+        SECRET_KEY: test_ci_secret_key_liyuid
+        AES_GCM_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      run: |
+        python -m pytest tests/ -v

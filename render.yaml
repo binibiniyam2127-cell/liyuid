@@ -1,0 +1,65 @@
+services:
+  # -------------------------------------------------------------
+  # 1. FastAPI Core Backend Service
+  # -------------------------------------------------------------
+  - type: web
+    name: liyuid-backend
+    runtime: docker
+    dockerfilePath: ./liyuid-backend/Dockerfile
+    dockerContext: ./liyuid-backend
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: liyuid-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: liyuid-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 1440
+      - key: DISABLE_SQLALCHEMY_CEXT
+        value: 1
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        value: noreply@liyuid.com
+      - key: SMTP_FROM_NAME
+        value: "LIYUID National Registry"
+
+  # -------------------------------------------------------------
+  # 2. Redis Cache Service
+  # -------------------------------------------------------------
+  - type: redis
+    name: liyuid-redis
+    plan: free
+    region: frankfurt
+    ipAllowList: []
+
+databases:
+  # -------------------------------------------------------------
+  # 3. PostgreSQL Managed Database
+  # -------------------------------------------------------------
+  - name: liyuid-db
+    databaseName: liyuid_db
+    user: liyuid_admin
+    plan: free
+    region: frankfurt
+

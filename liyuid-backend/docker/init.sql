@@ -18,10 +18,12 @@ END $$;
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
-    phone_number VARCHAR(32) UNIQUE,
+    phone_number VARCHAR(32) UNIQUE NOT NULL,
+    display_name VARCHAR(64) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
     telegram_chat_id VARCHAR(64),
     hashed_password VARCHAR(255) NOT NULL,
-    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(32) DEFAULT 'user' NOT NULL, -- Added for B1 admin RBAC
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
@@ -39,7 +41,7 @@ CREATE TABLE IF NOT EXISTS items (
     public_description TEXT NOT NULL,
     challenge_type VARCHAR(100),
     challenge_question TEXT,
-    private_challenge_truth TEXT NOT NULL,
+    private_challenge_truth TEXT, -- Changed: NULLABLE because lost items do not have secrets
     location GEOMETRY(Point, 4326) NOT NULL,
     incident_timestamp TIMESTAMPTZ NOT NULL,
     text_embedding vector(384),
@@ -58,10 +60,12 @@ CREATE TABLE IF NOT EXISTS matches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     lost_item_id UUID REFERENCES items(id) ON DELETE CASCADE,
     found_item_id UUID REFERENCES items(id) ON DELETE CASCADE,
+    claimant_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Added for B1 per-claimant tracking
     composite_score FLOAT NOT NULL,
     score_breakdown JSONB NOT NULL,
     verification_attempts INT DEFAULT 0,
     is_verified BOOLEAN DEFAULT FALSE,
+    is_locked BOOLEAN DEFAULT FALSE, -- Added for B1 match-level locking
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

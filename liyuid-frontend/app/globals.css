@@ -3,6 +3,7 @@
 @import "tailwindcss/utilities";
 
 :root {
+  --font-noto-ethiopic: 'Noto Sans Ethiopic', 'Nyala', 'Abyssinica SIL', system-ui, sans-serif;
   --bg: #EEF2F8;
   --card: #FFFFFF;
   --ink: #0B1F3A;

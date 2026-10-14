@@ -1,4 +1,4 @@
-import { Sora, Noto_Sans_Ethiopic } from "next/font/google";
+import { Sora } from "next/font/google";
 
 export const sora = Sora({
   subsets: ["latin"],
@@ -7,9 +7,10 @@ export const sora = Sora({
   variable: "--font-sora",
 });
 
-export const notoSansEthiopic = Noto_Sans_Ethiopic({
-  subsets: ["ethiopic"],
-  weight: ["400", "600"],
-  display: "swap",
-  variable: "--font-noto-ethiopic",
-});
+// Decoupled from next-font-loader to prevent webpack css-loader compilation errors
+// caused by Google Fonts variable font-stretch metadata in CI/CD build environments.
+// Loaded via high-performance preconnected Google CDN link in app/layout.tsx.
+export const notoSansEthiopic = {
+  variable: "font-noto-ethiopic",
+  className: "font-noto-ethiopic",
+};

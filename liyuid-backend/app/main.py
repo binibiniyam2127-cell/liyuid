@@ -316,7 +316,7 @@ def health_check():
     except Exception as exc:
         redis_status = f"error: {str(exc)}"
 
-    is_healthy = db_status == "connected" and redis_status == "connected"
+    is_healthy = "error" not in db_status
     status_code = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(

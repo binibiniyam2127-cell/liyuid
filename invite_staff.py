@@ -119,20 +119,24 @@ def invite_staff(staff_code: str, full_name: str, email: str, role: str, passwor
 
         session.commit()
 
-        print("\n" + "=" * 68)
+        import urllib.parse
+        qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={urllib.parse.quote(totp_uri)}"
+
+        print("\n" + "=" * 70)
         print("  [SUCCESS] MUNICIPAL STAFF ONBOARDING CREDENTIALS GENERATED")
-        print("=" * 68)
+        print("=" * 70)
         print(f"  Officer Name:        {full_name}")
         print(f"  Designated Role:     {role}")
         print(f"  Official Email:      {email}")
         print(f"  Staff ID Code:       {staff_code}")
         print(f"  Temporary Password:  {password}")
-        print(f"  2FA Authenticator:   {totp_secret}")
-        print("-" * 68)
+        print(f"  2FA Secret Key:      {totp_secret}")
+        print(f"  Scan QR Code:        {qr_code_url}")
+        print("-" * 70)
         print("  LOGIN PORTAL:  https://liyuid-tau.vercel.app/staff/login")
-        print("  AUTHENTICATOR: Add the 2FA secret above into Google Authenticator")
-        print("                 or Microsoft Authenticator to generate 6-digit codes.")
-        print("=" * 68 + "\n")
+        print("  AUTHENTICATOR: Open the 'Scan QR Code' link above to scan with")
+        print("                 Google Authenticator or enter the Secret Key manually.")
+        print("=" * 70 + "\n")
         return True
 
     except Exception as e:
@@ -165,10 +169,13 @@ def main():
             print(f"Total: {len(rows)} staff members registered.\n")
         return
 
-    # Interactive mode if parameters not fully passed
-    code = args.code or input("Enter Staff Code (e.g. MUN-KIRKOS-02): ").strip()
-    name = args.name or input("Enter Officer Full Name (e.g. Dawit Haile): ").strip()
-    email = args.email or input("Enter Official Email (e.g. dawit@liyuid.gov.et): ").strip()
+    import secrets
+    print("\n" + "=" * 60)
+    print("  LIYUID MUNICIPAL STAFF ONBOARDING (INTERACTIVE)")
+    print("=" * 60)
+    code = args.code or input("Enter Staff Code (e.g. MUN-BOLE-03): ").strip()
+    name = args.name or input("Enter Officer Full Name (e.g. Kenenisa Bekele): ").strip()
+    email = args.email or input("Enter Official Email (e.g. kenenisa@liyuid.gov.et): ").strip()
 
     if not args.role:
         print("\nSelect Staff Role / Desk Assignment:")
@@ -179,7 +186,12 @@ def main():
     else:
         role = args.role
 
-    password = args.password or input("Enter Initial Password (e.g. Staff@123456): ").strip()
+    if args.password:
+        password = args.password
+    else:
+        default_pw = "Officer@" + secrets.token_hex(3).capitalize() + "!"
+        input_pw = input(f"Enter Initial Password [Press Enter for '{default_pw}']: ").strip()
+        password = input_pw if input_pw else default_pw
 
     invite_staff(code, name, email, role, password, args.db)
 

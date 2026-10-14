@@ -9,18 +9,15 @@ services:
     dockerContext: .
     plan: free
     region: frankfurt
+    buildCommand: "./build.sh"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"
     envVars:
       - key: PORT
         value: 8000
       - key: DATABASE_URL
-        fromDatabase:
-          name: liyuid-db
-          property: connectionString
+        sync: false
       - key: REDIS_URL
-        fromService:
-          type: redis
-          name: liyuid-redis
-          property: connectionString
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: ALGORITHM
@@ -40,26 +37,6 @@ services:
       - key: SMTP_PASSWORD
         sync: false
       - key: SMTP_FROM_EMAIL
-        value: noreply@liyuid.com
+        value: noreply@liyuid.gov.et
       - key: SMTP_FROM_NAME
         value: "LIYUID National Registry"
-
-  # -------------------------------------------------------------
-  # 2. Redis Cache Service
-  # -------------------------------------------------------------
-  - type: redis
-    name: liyuid-redis
-    plan: free
-    region: frankfurt
-    ipAllowList: []
-
-databases:
-  # -------------------------------------------------------------
-  # 3. PostgreSQL Managed Database
-  # -------------------------------------------------------------
-  - name: liyuid-db
-    databaseName: liyuid_db
-    user: liyuid_admin
-    plan: free
-    region: frankfurt
-

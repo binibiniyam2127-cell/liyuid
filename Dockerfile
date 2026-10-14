@@ -3,15 +3,20 @@ FROM python:3.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=1000 \
-    PIP_RETRIES=10
+    PIP_RETRIES=10 \
+    PYTHONPATH="/app:/app/liyuid-backend:${PYTHONPATH}"
 
 WORKDIR /app
 
-# Install application dependencies with lightweight CPU torch wheels
-COPY liyuid-backend/requirements.txt .
-RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+# Copy requirements file (available both in root context and subfolder context)
+COPY requirements.txt .
 
-# Copy backend source
-COPY liyuid-backend/ .
+# Pre-install lightweight CPU PyTorch wheel and dependencies
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch && \
+    pip install --no-cache-dir -r requirements.txt
 
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+# Copy application source code
+COPY . .
+
+# Run uvicorn dynamically regardless of root or subfolder context
+CMD ["sh", "-c", "if [ -d liyuid-backend/app ]; then cd liyuid-backend; fi && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

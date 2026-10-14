@@ -5,8 +5,8 @@ services:
   - type: web
     name: liyuid-backend
     runtime: docker
-    dockerfilePath: ./liyuid-backend/Dockerfile
-    dockerContext: ./liyuid-backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     region: frankfurt
     envVars:

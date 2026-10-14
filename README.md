@@ -114,11 +114,24 @@ LIYUID/
 │   │   └── cli.py               # Administrative staff creation CLI
 │   └── requirements.txt         # Optimized CPU wheels & lightweight dependencies
 │
+├── liyuid-ai-worker/            # Asynchronous ML & Notification Worker Service
+│   ├── tasks.py                 # Celery background tasks (batch embeddings, SMS & Telegram alerts)
+│   ├── celery_app.py            # Celery distributed task queue configuration
+│   ├── Dockerfile               # Standalone container for background ML worker
+│   └── requirements.txt         # Celery, Redis & ML dependencies
+│
 ├── invite_staff.py              # Interactive Municipal Staff Onboarding Tool (with QR)
 ├── Dockerfile                   # Fail-safe root Dockerfile supporting Render & CI/CD
-├── docker-compose.yml           # Local multi-service orchestration (FastAPI + Redis + Postgres)
+├── docker-compose.yml           # Local multi-service orchestration (FastAPI + Redis + Postgres + Worker)
 └── README.md                    # Project documentation
 ```
+
+### 🧠 The Role of `liyuid-ai-worker`
+* **Distributed Asynchronous Execution:** In multi-container environments (and local Docker Compose), `liyuid-ai-worker` is powered by **Celery + Redis** to handle high-throughput background processing:
+  * Generating 384-dimensional dense semantic vector embeddings (`all-MiniLM-L6-v2`).
+  * Dispatching instant SMS (AfroMessage / Twilio) and Telegram Bot citizen notifications.
+  * Performing periodic scheduled district custody reconciliations.
+* **Unified Cloud Mode:** In free-tier cloud deployments (such as Render + Neon), PyTorch CPU inference and notifications run synchronously inside `liyuid-backend` to eliminate the cost of a standalone Redis broker and separate worker VM, preserving 100% feature parity.
 
 ---
 
@@ -201,3 +214,4 @@ python invite_staff.py --list
 
 Designed and engineered for national property recovery and civic governance in Ethiopia.  
 **City Administration of Addis Ababa • Sub-City Restitution Stations • LIYUID Core Team**
+

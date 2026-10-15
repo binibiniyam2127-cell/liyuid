@@ -26,16 +26,22 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
+    import time
     from sqlalchemy import text
-    try:
-        with engine.connect() as conn:
-            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
-            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "postgis";'))
-            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "vector";'))
-            conn.commit()
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        print(f"Warning: Database setup encountered an error (tests not requiring DB will still run): {e}")
+    for attempt in range(5):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
+                conn.execute(text('CREATE EXTENSION IF NOT EXISTS "postgis";'))
+                conn.execute(text('CREATE EXTENSION IF NOT EXISTS "vector";'))
+                conn.commit()
+            Base.metadata.create_all(bind=engine)
+            break
+        except Exception as e:
+            if attempt < 4:
+                time.sleep(2)
+            else:
+                raise e
     yield
 
 @pytest.fixture

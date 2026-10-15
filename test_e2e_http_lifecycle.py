@@ -28,10 +28,21 @@ def make_request(path: str, method: str = "GET", data: dict = None, token: str =
         except Exception:
             return exc.code, {"error": err_body}
 
-def authenticate_user(email: str, password: str = "SecurePass123!") -> str:
-    # 1. Register user
-    reg_payload = {"email": email, "password": password, "full_name": email.split("@")[0].title()}
-    make_request("/auth/register", method="POST", data=reg_payload)
+def authenticate_user(email: str, password: str = "SecurePass123!", phone_number: str = None) -> str:
+    # 1. Register user with all required schema fields
+    if not phone_number:
+        rand_num = f"{uuid.uuid4().int % 900000000 + 100000000}"
+        phone_number = f"+251{rand_num}"
+    
+    reg_payload = {
+        "email": email,
+        "password": password,
+        "display_name": email.split("@")[0].title()[:20],
+        "full_name": email.split("@")[0].title(),
+        "phone_number": phone_number,
+    }
+    code, res = make_request("/auth/register", method="POST", data=reg_payload)
+    assert code in (200, 201), f"User registration failed for {email}: {res}"
 
     # 2. Request OAuth2 password bearer token directly using form-urlencoded body
     url = f"{BASE_URL}/auth/token"

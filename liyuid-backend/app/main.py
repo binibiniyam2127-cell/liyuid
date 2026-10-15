@@ -961,21 +961,32 @@ def find_candidate_matches(item_id: uuid.UUID, db: Session = Depends(get_db)):
     # Ensure source item has text_embedding
     if source_item.text_embedding is None:
         source_item.text_embedding = get_ml_model().encode(source_item.public_description).tolist()
-        db.commit()
-        db.refresh(source_item)
+    if source_item.status == "embedding_pending":
+        source_item.status = "active"
+    db.commit()
+    db.refresh(source_item)
 
     # Ensure target candidates in category have text_embedding
     pending_items = db.query(Item).filter(
         Item.type == target_type,
         Item.category == source_item.category,
-        Item.status == 'active',
+        Item.status.in_(["active", "embedding_pending"]),
         Item.text_embedding.is_(None)
     ).all()
     if pending_items:
         model = get_ml_model()
         for p in pending_items:
             p.text_embedding = model.encode(p.public_description).tolist()
+            if p.status == "embedding_pending":
+                p.status = "active"
         db.commit()
+
+    db.query(Item).filter(
+        Item.type == target_type,
+        Item.category == source_item.category,
+        Item.status == "embedding_pending",
+    ).update({"status": "active"}, synchronize_session=False)
+    db.commit()
 
     source_embed_str = str(source_item.text_embedding.tolist() if hasattr(source_item.text_embedding, "tolist") else list(source_item.text_embedding))
 
@@ -992,7 +1003,7 @@ def find_candidate_matches(item_id: uuid.UUID, db: Session = Depends(get_db)):
         FROM items i, source s
         WHERE i.type = :target_type
           AND i.category = :category
-          AND i.status = 'active'
+          AND i.status IN ('active', 'embedding_pending')
           AND i.text_embedding IS NOT NULL
           AND ST_DWithin(i.location::geography, s.location::geography, 15000)
         ORDER BY cosine_sim DESC
@@ -1016,7 +1027,7 @@ def find_candidate_matches(item_id: uuid.UUID, db: Session = Depends(get_db)):
             SELECT id, type, category, brand, model, primary_color, public_description, incident_timestamp,
                    1.0 AS distance_km, 0.95 AS cosine_sim, 1.0 AS hours_diff
             FROM items
-            WHERE type = :target_type AND category = :category AND status = 'active'
+            WHERE type = :target_type AND category = :category AND status IN ('active', 'embedding_pending')
             ORDER BY created_at DESC LIMIT 5;
             """),
             {"target_type": target_type, "category": source_item.category}
@@ -1777,7 +1788,7 @@ def verify_item_claim(
         counterpart = db.query(Item).filter(
             Item.type == counterpart_type,
             Item.category == item.category,
-            Item.status == "active",
+            Item.status.in_(["active", "embedding_pending"]),
         ).first()
         if counterpart:
             match_record = Match(

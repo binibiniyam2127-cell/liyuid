@@ -76,6 +76,15 @@ CREATE TABLE IF NOT EXISTS handovers (
     handover_code_hash VARCHAR(255) NOT NULL,
     owner_confirmed BOOLEAN DEFAULT FALSE NOT NULL,
     finder_confirmed BOOLEAN DEFAULT FALSE NOT NULL,
+    status VARCHAR(32) DEFAULT 'open' NOT NULL,
+    venue VARCHAR(32) DEFAULT 'direct',
+    station_location VARCHAR(255),
+    vault_locker VARCHAR(64),
+    deposit_voucher VARCHAR(64),
+    municipal_notes TEXT,
+    regenerate_count INT DEFAULT 0,
+    code_attempts INT DEFAULT 0,
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '24 hours'),
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     completed_at TIMESTAMPTZ
 );

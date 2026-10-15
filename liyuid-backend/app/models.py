@@ -133,6 +133,7 @@ class Match(Base):
     )
     composite_score = Column(Float, nullable=False)
     score_breakdown = Column(JSONB, nullable=False)
+    verification_attempts = Column(Integer, default=0, nullable=False)
     is_verified = Column(Boolean, default=False, nullable=False)
     is_locked = Column(Boolean, default=False, nullable=False)
 
@@ -180,7 +181,7 @@ class Handover(Base):
     municipal_notes = Column(Text, nullable=True)
     regenerate_count = Column(Integer, default=0, nullable=False)
     code_attempts = Column(Integer, default=0, nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(

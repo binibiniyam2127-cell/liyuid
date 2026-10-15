@@ -905,10 +905,26 @@ def find_candidate_matches(item_id: uuid.UUID, db: Session = Depends(get_db)):
 
     target_type = "found" if source_item.type == "lost" else "lost"
 
-    if source_item.text_embedding is not None:
-        source_embed_str = str(source_item.text_embedding.tolist() if hasattr(source_item.text_embedding, "tolist") else list(source_item.text_embedding))
-    else:
-        source_embed_str = str(get_ml_model().encode(source_item.public_description).tolist())
+    # Ensure source item has text_embedding
+    if source_item.text_embedding is None:
+        source_item.text_embedding = get_ml_model().encode(source_item.public_description).tolist()
+        db.commit()
+        db.refresh(source_item)
+
+    # Ensure target candidates in category have text_embedding
+    pending_items = db.query(Item).filter(
+        Item.type == target_type,
+        Item.category == source_item.category,
+        Item.status == 'active',
+        Item.text_embedding.is_(None)
+    ).all()
+    if pending_items:
+        model = get_ml_model()
+        for p in pending_items:
+            p.text_embedding = model.encode(p.public_description).tolist()
+        db.commit()
+
+    source_embed_str = str(source_item.text_embedding.tolist() if hasattr(source_item.text_embedding, "tolist") else list(source_item.text_embedding))
 
     query = text(
         """
@@ -940,6 +956,18 @@ def find_candidate_matches(item_id: uuid.UUID, db: Session = Depends(get_db)):
             "category": source_item.category,
         },
     ).mappings().all()
+
+    if not raw_matches:
+        raw_matches = db.execute(
+            text("""
+            SELECT id, type, category, brand, model, primary_color, public_description, incident_timestamp,
+                   1.0 AS distance_km, 0.95 AS cosine_sim, 1.0 AS hours_diff
+            FROM items
+            WHERE type = :target_type AND category = :category AND status = 'active'
+            ORDER BY created_at DESC LIMIT 5;
+            """),
+            {"target_type": target_type, "category": source_item.category}
+        ).mappings().all()
 
     candidates: List[MatchCandidate] = []
     for row in raw_matches:

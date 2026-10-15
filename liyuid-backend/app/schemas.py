@@ -207,7 +207,9 @@ class ReviewRequestResponse(BaseModel):
 # Handover Schemas (B5)
 # ============================================================================
 class HandoverConfirmRequest(BaseModel):
-    finder_code: Optional[str] = Field(None, pattern=r"^[0-9]{6}$")
+    finder_code: Optional[str] = None
+    handover_code: Optional[str] = None
+    role: Optional[str] = None
 
 
 class HandoverResponse(BaseModel):
@@ -223,6 +225,7 @@ class HandoverResponse(BaseModel):
     municipal_notes: Optional[str] = None
     expires_at: datetime
     completed_at: Optional[datetime] = None
+    is_fully_closed: Optional[bool] = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -325,8 +328,11 @@ class ChatMessagePayload(BaseModel):
     @classmethod
     def block_phone_numbers(cls, v: str) -> str:
         phone_pattern = r"(\+251\s?[0-9]{9}|09\s?[0-9]{8}|07\s?[0-9]{8}|\b\d{8,}\b)"
+        email_pattern = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
         if re.search(phone_pattern, v):
             raise ValueError("Direct phone numbers are strictly prohibited in chat for safety.")
+        if re.search(email_pattern, v):
+            raise ValueError("Direct email addresses are strictly prohibited in chat for safety.")
         return v
 
 

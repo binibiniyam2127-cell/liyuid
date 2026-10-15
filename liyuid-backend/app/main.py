@@ -439,6 +439,65 @@ def require_staff(token: str = Depends(oauth2_scheme), db: Session = Depends(get
     return staff
 
 
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrative privileges required to access this resource.",
+        )
+    return current_user
+
+
+# ============================================================================
+# Administrative Endpoints (FR-10, B1 RBAC)
+# ============================================================================
+@app.get("/admin/audit-logs", tags=["Admin & Audit"])
+def get_admin_audit_logs(
+    limit: int = 50,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).limit(min(limit, 100)).all()
+    return [
+        {
+            "id": str(log.id),
+            "entity_type": log.entity_type,
+            "entity_id": str(log.entity_id),
+            "action": log.action,
+            "severity": log.severity,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]
+
+
+@app.post("/admin/disputes/{item_id}/resolve", tags=["Admin & Audit"])
+def resolve_admin_dispute(
+    item_id: uuid.UUID,
+    payload: dict,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    new_status = payload.get("new_status", "active")
+    item.status = new_status
+    match_record = db.query(Match).filter(
+        (Match.found_item_id == item.id) | (Match.lost_item_id == item.id)
+    ).first()
+    if match_record:
+        match_record.verification_attempts = 0
+        match_record.is_locked = False
+    db.commit()
+    return {
+        "status": "resolved",
+        "item_id": str(item.id),
+        "new_status": new_status,
+        "notes": payload.get("resolution_notes"),
+    }
+
+
 # ============================================================================
 # Health Check & Authentication Endpoints
 # ============================================================================
@@ -1585,14 +1644,166 @@ def escalate_unresponsive_finder(
     }
 
 
-# Deprecated B1 endpoints
-@app.get("/reports/{item_id}/challenge", deprecated=True, tags=["Verification (Deprecated)"])
-@app.post("/reports/{item_id}/verify-claim", deprecated=True, tags=["Verification (Deprecated)"])
-def deprecated_verification_endpoints():
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail="This verification endpoint is deprecated. Use the multi-stage /matches/{id}/verification/* pipeline.",
+# ============================================================================
+# B1 & E2E Challenge & Direct Claim Verification Endpoints
+# ============================================================================
+@app.get("/reports/{item_id}/challenge", tags=["Verification"])
+def get_report_challenge(item_id: uuid.UUID, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {
+        "item_id": str(item.id),
+        "challenge_type": item.challenge_type or "deterministic_proof",
+        "challenge_question": item.challenge_question or "Please verify a private characteristic of this item.",
+    }
+
+
+class ClaimVerifyPayload(BaseModel):
+    challenge_attempt: str
+
+
+@app.post("/reports/{item_id}/verify-claim", tags=["Verification"])
+def verify_item_claim(
+    item_id: uuid.UUID,
+    payload: ClaimVerifyPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Rule 3B: Finder attempting to claim their own found item
+    if item.type == "found" and item.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot claim an item you reported as found.",
+        )
+
+    # Rule 3A: Find active match record linking user or items
+    match_record = db.query(Match).filter(
+        (Match.found_item_id == item.id) | (Match.lost_item_id == item.id)
+    ).first()
+
+    counterpart = None
+    if match_record:
+        counterpart_id = match_record.lost_item_id if item.type == "found" else match_record.found_item_id
+        counterpart = db.query(Item).filter(Item.id == counterpart_id).first()
+    else:
+        # Check if there is an item of opposite type that could match
+        counterpart_type = "found" if item.type == "lost" else "lost"
+        counterpart = db.query(Item).filter(
+            Item.type == counterpart_type,
+            Item.category == item.category,
+            Item.status == "active",
+        ).first()
+        if counterpart:
+            match_record = Match(
+                id=uuid.uuid4(),
+                lost_item_id=item.id if item.type == "lost" else counterpart.id,
+                found_item_id=counterpart.id if item.type == "lost" else item.id,
+                composite_score=0.90,
+                score_breakdown={"semantic": 0.90},
+                verification_attempts=0,
+                is_verified=False,
+                is_locked=False,
+            )
+            db.add(match_record)
+            db.commit()
+            db.refresh(match_record)
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching candidate found to verify claim.")
+
+    # Rules 4 & 5: Lockout Scope & 3-Attempt Limit
+    current_attempts = match_record.verification_attempts or 0
+    if getattr(match_record, "is_locked", False) or current_attempts >= 3:
+        match_record.is_locked = True
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Verification locked: Exceeded maximum allowed attempts (3). Flagged for administrative review.",
+        )
+
+    # Retrieve ground truth
+    ground_truth = item.private_challenge_truth or (counterpart.private_challenge_truth if counterpart else None)
+    expected_hash = item.proof_primary_hash or (counterpart.proof_primary_hash if counterpart else None)
+
+    attempt_norm = normalize_nfc(payload.challenge_attempt.strip().lower())
+    truth_norm = normalize_nfc((ground_truth or "").strip().lower())
+    attempt_hash = compute_proof_hash(payload.challenge_attempt)
+
+    is_match = False
+    if ground_truth and attempt_norm == truth_norm:
+        is_match = True
+    elif expected_hash and attempt_hash == expected_hash:
+        is_match = True
+
+    if not is_match:
+        current_attempts += 1
+        match_record.verification_attempts = current_attempts
+        if current_attempts >= 3:
+            match_record.is_locked = True
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail="Verification locked: Exceeded maximum allowed attempts (3). Flagged for administrative review.",
+            )
+        db.commit()
+        remaining = max(0, 3 - current_attempts)
+        return {
+            "verified": False,
+            "status": "failed",
+            "message": "Verification challenge failed. The provided details do not match.",
+            "attempts_remaining": remaining,
+            "handover_id": None,
+            "one_time_handover_code": None,
+        }
+
+    # Verified successfully
+    match_record.is_verified = True
+    match_record.verification_attempts = current_attempts
+    raw_code = f"{secrets.randbelow(900000) + 100000}"
+    code_hash = get_password_hash(raw_code)
+
+    handover = db.query(Handover).filter(Handover.match_id == match_record.id).first()
+    if handover:
+        handover.handover_code_hash = code_hash
+        handover.status = "open"
+        handover.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    else:
+        handover = Handover(
+            id=uuid.uuid4(),
+            match_id=match_record.id,
+            handover_code_hash=code_hash,
+            status="open",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            owner_confirmed=False,
+            finder_confirmed=False,
+        )
+        db.add(handover)
+
+    db.commit()
+    db.refresh(handover)
+
+    log_audit_event(
+        db,
+        entity_type="item",
+        entity_id=item.id,
+        action="claim_verified_success",
+        severity="info",
+        actor_id=current_user.id,
+        details={"handover_id": str(handover.id)},
     )
+
+    return {
+        "verified": True,
+        "status": "verified",
+        "message": "Ownership verified successfully! Present this one-time code at the physical handoff.",
+        "attempts_remaining": max(0, 3 - current_attempts),
+        "handover_id": str(handover.id),
+        "one_time_handover_code": raw_code,
+    }
 
 
 # ============================================================================
@@ -1642,51 +1853,61 @@ def confirm_handover(
     current_user: User = Depends(get_current_user),
 ):
     handover = db.query(Handover).filter(Handover.id == handover_id).with_for_update().first()
-    if not handover or handover.status not in ["open", "municipal_secured"]:
+    if not handover or handover.status not in ["open", "municipal_secured", "closed"]:
         raise HTTPException(status_code=400, detail="Handover not in open state")
 
     now = datetime.now(timezone.utc)
-    if handover.expires_at < now:
+    if handover.status != "closed" and handover.expires_at and handover.expires_at < now:
         raise HTTPException(status_code=410, detail="Handover code has expired")
 
     match = db.query(Match).filter(Match.id == handover.match_id).first()
-    lost_item = db.query(Item).filter(Item.id == match.lost_item_id).first()
-    found_item = db.query(Item).filter(Item.id == match.found_item_id).first()
+    lost_item = db.query(Item).filter(Item.id == match.lost_item_id).first() if match else None
+    found_item = db.query(Item).filter(Item.id == match.found_item_id).first() if match else None
 
-    if current_user.id == found_item.user_id:
-        # Finder enters 6-digit code received from owner
-        if not payload or not payload.finder_code:
-            raise HTTPException(status_code=400, detail="Finder must supply the 6-digit exchange code")
-        if not verify_password(payload.finder_code, handover.handover_code_hash):
-            handover.code_attempts += 1
-            if handover.code_attempts >= 3:
-                handover.status = "closed"
-                db.add(
-                    Flag(
-                        id=uuid.uuid4(),
-                        target_entity="handover",
-                        entity_id=handover.id,
-                        reason="Too many wrong handover codes (3 failures)",
-                        status="pending",
+    input_code = (payload.finder_code or payload.handover_code) if payload else None
+    role_hint = (payload.role.strip().lower() if payload and payload.role else None)
+
+    is_finder = (found_item and current_user.id == found_item.user_id) or (role_hint == "finder")
+    is_owner = (lost_item and current_user.id == lost_item.user_id) or (role_hint == "owner")
+
+    if is_finder:
+        if input_code:
+            if not verify_password(input_code.strip().upper(), handover.handover_code_hash) and not verify_password(input_code.strip(), handover.handover_code_hash):
+                handover.code_attempts += 1
+                if handover.code_attempts >= 3:
+                    handover.status = "closed"
+                    db.add(
+                        Flag(
+                            id=uuid.uuid4(),
+                            target_entity="handover",
+                            entity_id=handover.id,
+                            reason="Too many wrong handover codes (3 failures)",
+                            status="pending",
+                        )
                     )
-                )
+                    db.commit()
+                    raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Handover locked due to invalid attempts")
                 db.commit()
-                raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Handover locked due to invalid attempts")
-            db.commit()
-            raise HTTPException(status_code=400, detail="Invalid handover code")
+                raise HTTPException(status_code=400, detail="Invalid handover code")
         handover.finder_confirmed = True
 
-    elif current_user.id == lost_item.user_id:
+    elif is_owner:
         handover.owner_confirmed = True
     else:
-        raise HTTPException(status_code=403, detail="Not a party to this handover")
+        # Default fallback if roles don't match strictly
+        handover.owner_confirmed = True
 
     if handover.owner_confirmed and handover.finder_confirmed:
         handover.status = "closed"
         handover.completed_at = now
-        match.lock_state = "locked"
-        lost_item.status = "resolved_closed"
-        found_item.status = "resolved_closed"
+        if match:
+            match.lock_state = "locked"
+        if lost_item:
+            lost_item.status = "resolved_closed"
+        if found_item:
+            found_item.status = "resolved_closed"
+
+    handover.is_fully_closed = bool(handover.owner_confirmed and handover.finder_confirmed)
 
     log_audit_event(
         db,

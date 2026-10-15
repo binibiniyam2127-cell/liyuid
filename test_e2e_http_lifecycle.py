@@ -74,39 +74,39 @@ def run_e2e_test():
 
     # 2. Ingest Reports (Found & Lost)
     print("\n[*] 2. Submitting Item Reports via POST /reports...")
+    ground_truth = "A sleeping white cat"
+    now_iso = "2026-09-28T09:00:00Z"
+    later_iso = "2026-09-28T18:00:00Z"
+
     found_payload = {
         "type": "found",
         "category": "electronics",
+        "sub_city": "Bole",
         "brand": "Apple",
         "model": "iPhone 13",
         "primary_color": "black",
         "public_description": "Found a black iPhone near Addis Ababa Bole airport lounge.",
-        "challenge_type": "deterministic_code",
-        "challenge_question": "What is on the lock screen wallpaper?",
-        "private_challenge_truth": "Unused finder placeholder",
-        "latitude": 8.9806,
-        "longitude": 38.7578,
-        "incident_timestamp": "2026-09-28T09:00:00Z"
+        "date_from": now_iso,
+        "date_to": later_iso,
+        "proof_kind": "contents",
+        "proof_primary": ground_truth,
+        "private_detail": f"Lock screen wallpaper: {ground_truth}",
     }
     code, found_res = make_request("/reports", method="POST", data=found_payload, token=finder_token)
     assert code in (200, 201), f"Found report creation failed: {found_res}"
     found_id = found_res["id"]
     print(f"    [+] Found Item ID : {found_id}")
 
-    ground_truth = "A sleeping white cat"
     lost_payload = {
         "type": "lost",
         "category": "electronics",
+        "sub_city": "Bole",
         "brand": "Apple",
         "model": "iPhone 13",
         "primary_color": "black",
-        "public_description": "Lost my black iPhone 13 at the Bole airport terminal.",
-        "challenge_type": "descriptive_marker",
-        "challenge_question": "What image is on the lock screen wallpaper?",
-        "private_challenge_truth": ground_truth,
-        "latitude": 8.9810,
-        "longitude": 38.7580,
-        "incident_timestamp": "2026-09-28T08:30:00Z"
+        "public_description": "Lost my black iPhone 13 at the Bole airport terminal gate.",
+        "date_from": now_iso,
+        "date_to": later_iso,
     }
     code, lost_res = make_request("/reports", method="POST", data=lost_payload, token=owner_token)
     assert code in (200, 201), f"Lost report creation failed: {lost_res}"

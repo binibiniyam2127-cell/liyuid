@@ -10,7 +10,10 @@ with urllib.request.urlopen(req) as resp:
 
 print("=== RECENT GITHUB ACTIONS RUNS ===")
 for r in data.get("workflow_runs", []):
-    print(f"ID: {r['id']} | Name: {r['name']:<28} | Conclusion: {r['conclusion']:<8} | Commit: {r['head_commit']['id'][:7]} - {r['head_commit']['message'][:40]}")
+    conclusion = str(r.get("conclusion") or r.get("status") or "in_progress")
+    commit_id = (r.get("head_commit") or {}).get("id", "       ")[:7]
+    commit_msg = (r.get("head_commit") or {}).get("message", "").split("\n")[0][:40]
+    print(f"ID: {r['id']} | Name: {r['name']:<28} | Status: {conclusion:<12} | Commit: {commit_id} - {commit_msg}")
     # Fetch jobs for this run
     jobs_url = r["jobs_url"]
     j_req = urllib.request.Request(jobs_url, headers={"User-Agent": "Python-Actions-Inspector"})

@@ -179,15 +179,18 @@ export default function RegisterPage() {
 
           {/* Phone Number */}
           <div>
-            <label className="block text-xs font-bold text-[#062B72] mb-1">
-              Phone number
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-[#062B72]">
+                Phone number
+              </label>
+              <span className="text-[10px] text-slate-400 font-medium">+251 9... or 09...</span>
+            </div>
             <div className="relative">
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="Enter your phone number"
+                placeholder="+251 911 234 567"
                 autoComplete="off"
                 className="w-full px-4 py-2 rounded-xl bg-white border border-slate-200 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#087FF5] focus:border-transparent transition-all shadow-xs"
                 required

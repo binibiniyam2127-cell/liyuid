@@ -58,6 +58,8 @@ export default function RegisterPage() {
       formattedPhone = "+2519" + formattedPhone.slice(2);
     } else if (formattedPhone.startsWith("07")) {
       formattedPhone = "+2517" + formattedPhone.slice(2);
+    } else if (formattedPhone.startsWith("251") && formattedPhone.length === 12) {
+      formattedPhone = "+" + formattedPhone;
     } else if ((formattedPhone.startsWith("9") || formattedPhone.startsWith("7")) && formattedPhone.length === 9) {
       formattedPhone = "+251" + formattedPhone;
     } else if (!formattedPhone.startsWith("+")) {

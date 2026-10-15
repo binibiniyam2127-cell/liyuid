@@ -2,6 +2,7 @@ import json
 import time
 import uuid
 import urllib.request
+import urllib.parse
 import urllib.error
 
 BASE_URL = "http://localhost:8000"

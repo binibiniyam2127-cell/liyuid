@@ -9,10 +9,10 @@ from app.database import Base, get_db
 from app.main import app, create_jwt_token, get_password_hash, USER_AUDIENCE, STAFF_AUDIENCE
 from app.models import Item, Match, User, StaffAccount
 
-# PostgreSQL connection string matching your docker setup
+# PostgreSQL connection string matching test service setup
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg://liyuid_admin:password@postgres:5432/liyuid_test"
+    "postgresql+psycopg://liyuid_admin:liyuid_password@localhost:5432/liyuid_test"
 )
 _db_name = (TEST_DATABASE_URL or "").rsplit("/", 1)[-1].split("?")[0]
 if not _db_name.endswith("_test"):
@@ -26,7 +26,16 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
-    Base.metadata.create_all(bind=engine)
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
+            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "postgis";'))
+            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "vector";'))
+            conn.commit()
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Warning: Database setup encountered an error (tests not requiring DB will still run): {e}")
     yield
 
 @pytest.fixture

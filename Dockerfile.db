@@ -1,9 +1,21 @@
 FROM postgis/postgis:16-3.4
 
-# Install pgvector directly into the official PostGIS image
-RUN apt-get update && \
-    apt-get install -y postgresql-16-pgvector && \
-    rm -rf /var/lib/apt/lists/*
+# Compile and install pgvector extension from source into official PostGIS image
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    postgresql-server-dev-16 \
+    ca-certificates \
+    && git clone --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector \
+    && cd /tmp/pgvector \
+    && make clean \
+    && make OPTFLAGS="" \
+    && make install \
+    && rm -rf /tmp/pgvector \
+    && apt-get purge -y build-essential git postgresql-server-dev-16 \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy complete database initialization schema
 COPY liyuid-backend/docker/init.sql /docker-entrypoint-initdb.d/02_schema.sql

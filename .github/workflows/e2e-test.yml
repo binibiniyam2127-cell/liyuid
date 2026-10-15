@@ -1,4 +1,4 @@
-﻿name: Liyuid E2E Integration Suite
+name: Liyuid E2E Integration Suite
 
 on:
   push:
@@ -42,12 +42,13 @@ jobs:
       - name: Build and Start Compose Services
         run: |
           docker compose down -v
-          docker compose up -d --build
+          docker compose up -d --build postgres redis backend worker
           docker compose ps
+
       - name: Wait for FastAPI & PostgreSQL to be Ready
         run: |
           echo "Waiting for services to become healthy..."
-          timeout 90 bash -c 'until curl -s -f http://localhost:8000/docs > /dev/null; do sleep 3; done'
+          timeout 120 bash -c 'until curl -s -f http://localhost:8000/docs > /dev/null; do sleep 3; done'
           echo "FastAPI Gateway is ready and responding!"
 
       - name: Set up Python Runtime

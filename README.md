@@ -6,8 +6,8 @@
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2014-black?style=for-the-badge&logo=next.js)](https://liyuid-tau.vercel.app)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://liyuid-backend.onrender.com/docs)
 [![PostgreSQL](https://img.shields.io/badge/Database-Neon%20pgvector-336791?style=for-the-badge&logo=postgresql)](https://neon.tech)
-[![Vercel](https://img.shields.io/badge/Deployment-Vercel-000000?style=for-the-badge&logo=vercel)](https://liyuid-tau.vercel.app)
-[![Render](https://img.shields.io/badge/API-Render-46E3B7?style=for-the-badge&logo=render)](https://liyuid-backend.onrender.com)
+[![CI](https://github.com/binibiniyam2127-cell/liyuid/actions/workflows/ci.yml/badge.svg)](https://github.com/binibiniyam2127-cell/liyuid/actions/workflows/ci.yml)
+[![E2E Integration](https://github.com/binibiniyam2127-cell/liyuid/actions/workflows/e2e-test.yml/badge.svg)](https://github.com/binibiniyam2127-cell/liyuid/actions/workflows/e2e-test.yml)
 [![License](https://img.shields.io/badge/License-Proprietary-blue?style=for-the-badge)](#)
 
 <br/>
@@ -22,7 +22,7 @@
 
 **LIYUID (ልዩ-ID)** is Ethiopia's national intelligent property recovery registry designed for metropolitan administrations (Addis Ababa Sub-Cities), university campuses, and civic transportation hubs. 
 
-By combining **384-dimensional semantic vector embeddings (`pgvector`)**, **spatial geospatial boundaries (`PostGIS`)**, and a **Zero-PII 4-layer challenge-response protocol**, LIYUID eliminates fraudulent claims, guarantees citizen privacy, and automates physical municipal vault custody.
+By combining **384-dimensional semantic vector embeddings (`pgvector`)**, **spatial geospatial boundaries (`PostGIS`)**, and a **Zero-PII blind challenge-response protocol**, LIYUID eliminates fraudulent claims, guarantees citizen privacy, and automates physical municipal vault custody.
 
 ---
 
@@ -33,12 +33,12 @@ By combining **384-dimensional semantic vector embeddings (`pgvector`)**, **spat
 * **Cosine Decision Boundaries:** Auto-triages high-confidence matches ($\ge 0.85$), routes borderline matches ($0.65 - 0.84$) for human review, and auto-prunes low-confidence noise ($< 0.65$).
 * **Zero PII Exposure:** Citizen phone numbers, full names, and sensitive identifiers are cryptographically masked and never exposed to finders or public search logs.
 
-### 2. 🛡️ 4-Layer Cryptographic Ownership Verification
-Before physical contact is authorized, claimants must pass a multi-factor challenge:
-1. **Photo Similarity Inspection:** Blind structural verification of item visual markers.
-2. **Deterministic Primary Proof:** Exact match against hashed IMEI, serial numbers, or national ID last-4 digits.
-3. **Decoy Trait Challenges:** Machine-generated multi-choice questions with random distractors (color, brand, case style).
-4. **Dynamic One-Time Password (OTP):** A cryptographic 6-digit release code generated exclusively for the verified owner.
+### 2. 🛡️ Blind-Sided Ownership Verification & Cryptographic Handover
+Before physical contact is authorized, claimants must pass a strict blind challenge protocol:
+1. **Zero-PII Blind Challenge:** Challenge endpoints never leak private truths, encrypted details, or hashes to public observers or potential impostors. Claimants must provide genuine private knowledge directly without multiple-choice distractors or quizzes.
+2. **Deterministic Primary Proof:** Exact cryptographic comparison against hashed IMEI, serial numbers, or national ID last-4 digits.
+3. **Anti-Brute Force Lockout Defense:** Strict 3-strike rate-limiting protects against enumeration; exceeding attempts locks the claim for administrative arbitration.
+4. **Dynamic One-Time Password (OTP) & Dual Confirmation:** A cryptographic 6-digit release code is minted strictly for the verified owner. The finder and owner mutually confirm the exchange at handoff, completing the restitution lifecycle and logging immutable audit entries.
 
 ### 3. 🏛️ Municipal Vault Custody & Automated Restitution
 * **Automated Shelf Tagging:** Drop-offs are assigned instant physical vault slots (e.g. `Locker B-14`, `Shelf C-03`) at sub-city desks.
@@ -63,7 +63,7 @@ Before physical contact is authorized, claimants must pass a multi-factor challe
 flowchart TD
     subgraph Citizens["Citizens (Mobile & Desktop)"]
         A1["Citizen Reporting"]
-        A2["Ownership Challenge"]
+        A2["Blind Ownership Challenge"]
         A3["Counter Restitution"]
     end
 
@@ -109,9 +109,15 @@ LIYUID/
 │   │   ├── main.py              # Core API endpoints & lifecycle logic
 │   │   ├── models.py            # SQLAlchemy models (pgvector, PostGIS, JSONB)
 │   │   ├── schemas.py           # Pydantic v2 validation contracts
-│   │   ├── verification_service.py # Decoy generation & AES-256 GCM encryption
 │   │   ├── database.py          # PostgreSQL session management with pool pre-ping
 │   │   └── cli.py               # Administrative staff creation CLI
+│   ├── docker/
+│   │   └── init.sql             # Unified PostgreSQL schema (PostGIS + pgvector)
+│   ├── tests/                   # Core Backend Pytest Suite
+│   │   ├── conftest.py          # Test database fixtures & auth headers
+│   │   ├── test_b1_security.py  # RBAC, Amharic NFC, & 3-strike lockout
+│   │   ├── test_b8_privacy_and_rules.py # Zero-PII schemas & anti-harvesting
+│   │   └── test_e2e_pipeline.py # End-to-end verification pipeline
 │   └── requirements.txt         # Optimized CPU wheels & lightweight dependencies
 │
 ├── liyuid-ai-worker/            # Asynchronous ML & Notification Worker Service
@@ -120,7 +126,9 @@ LIYUID/
 │   ├── Dockerfile               # Standalone container for background ML worker
 │   └── requirements.txt         # Celery, Redis & ML dependencies
 │
+├── test_e2e_http_lifecycle.py   # Full HTTP E2E Blind-Sided Verification Integration Test
 ├── invite_staff.py              # Interactive Municipal Staff Onboarding Tool (with QR)
+├── Dockerfile.db                # Multi-stage PostgreSQL + PostGIS + pgvector Dockerfile
 ├── Dockerfile                   # Fail-safe root Dockerfile supporting Render & CI/CD
 ├── docker-compose.yml           # Local multi-service orchestration (FastAPI + Redis + Postgres + Worker)
 └── README.md                    # Project documentation
@@ -135,18 +143,47 @@ LIYUID/
 
 ---
 
+## 🧪 Automated Testing & Continuous Integration
+
+LIYUID features two automated testing suites executed continuously on GitHub Actions:
+
+| Workflow Suite | Target Environment | Coverage |
+| :--- | :--- | :--- |
+| **Liyuid Test & Privacy CI** | Ubuntu Runner + PostgreSQL (`pgvector` + `PostGIS`) | **Unit & Security Tests:** Admin RBAC verification, Amharic Unicode NFC normalization, no self-match protection, 3-strike lockout, zero-PII schema contracts, and on-demand embedding search. |
+| **Liyuid E2E Integration Suite** | Docker Compose (`postgres`, `redis`, `backend`, `worker`) | **Live HTTP Lifecycle:** Citizen registration, report creation, blind challenge privacy leak checks, lockout decrement tests, authentic proof verification, 6-digit dynamic OTP generation, dual-party handover confirmation, and PostgreSQL audit trail verification. |
+
+To run the suites locally:
+```bash
+# Run backend pytest suite
+PYTHONPATH=liyuid-backend:. python -m pytest liyuid-backend/tests/ -v
+
+# Run live E2E HTTP integration test
+python test_e2e_http_lifecycle.py
+```
+
+---
+
 ## 🚀 Quick Start (Local Development)
 
 ### Prerequisites
 * **Python 3.11+**
 * **Node.js 18+ & npm**
-* **PostgreSQL with `pgvector` & `postgis`** (or Docker)
+* **Docker & Docker Compose** (or local PostgreSQL with `pgvector` & `postgis`)
 
-### 1. Backend Setup
+### 1. Multi-Container Orchestration (Docker Compose)
 ```bash
 # Clone the repository
 git clone https://github.com/binibiniyam2127-cell/liyuid.git
 cd liyuid
+
+# Build and start all services (PostgreSQL, Redis, Backend, Worker)
+docker compose up -d --build
+```
+FastAPI Gateway will be live at `http://localhost:8000/docs`.
+
+### 2. Manual Backend Setup
+```bash
+cd liyuid-backend
 
 # Create virtual environment
 python -m venv .venv
@@ -158,9 +195,8 @@ pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requiremen
 # Start backend server
 uvicorn app.main:app --reload --port 8000
 ```
-Backend Swagger Documentation will be live at: `http://localhost:8000/docs`
 
-### 2. Frontend Setup
+### 3. Frontend Setup
 ```bash
 cd liyuid-frontend
 
@@ -214,4 +250,3 @@ python invite_staff.py --list
 
 Designed and engineered for national property recovery and civic governance in Ethiopia.  
 **City Administration of Addis Ababa • Sub-City Restitution Stations • LIYUID Core Team**
-

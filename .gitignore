@@ -11,6 +11,4 @@ data/
 *.log
 *.env
 .env.*
-test_telegram_live.py
-test_*.py
 *-tree.txt

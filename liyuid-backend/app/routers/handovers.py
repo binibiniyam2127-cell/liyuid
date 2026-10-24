@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user, require_staff
+from app.core.rate_limit import RateLimiter
 from app.database import get_db
 from app.models import StaffAccount, User
 from app.schemas import (
@@ -31,7 +32,11 @@ def regenerate_handover_code(
     return handover_service.regenerate_handover_code(handover_id, current_user, db)
 
 
-@router.post("/{handover_id}/confirm", response_model=HandoverResponse)
+@router.post(
+    "/{handover_id}/confirm",
+    response_model=HandoverResponse,
+    dependencies=[Depends(RateLimiter(limit=10, window_seconds=60, by="user", scope="handover:confirm"))],
+)
 def confirm_handover(
     handover_id: uuid.UUID,
     payload: Optional[HandoverConfirmRequest] = None,

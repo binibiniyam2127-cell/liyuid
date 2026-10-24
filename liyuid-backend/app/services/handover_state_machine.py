@@ -271,3 +271,4 @@ class HandoverStateMachine:
         db.commit()
         db.refresh(handover)
         return handover
+

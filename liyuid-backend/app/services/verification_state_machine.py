@@ -340,3 +340,4 @@ class VerificationStateMachine:
         )
         db.commit()
         return new_state
+

@@ -24,7 +24,7 @@ if not _db_name.endswith("_test"):
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def setup_test_db():
     import time
     from sqlalchemy import text
@@ -45,7 +45,7 @@ def setup_test_db():
     yield
 
 @pytest.fixture
-def db_session():
+def db_session(setup_test_db):
     db = TestingSessionLocal()
     try:
         yield db

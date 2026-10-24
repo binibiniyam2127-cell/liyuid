@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit_event
 from app.core.config import ALGORITHM, SECRET_KEY, STAFF_AUDIENCE, USER_AUDIENCE
 from app.core.security import oauth2_scheme
+from app.core.session import is_token_revoked
 from app.database import get_db
 from app.models import StaffAccount, User
 
@@ -16,6 +17,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if is_token_revoked(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], audience=USER_AUDIENCE)
         user_id_str: str = payload.get("sub")
@@ -32,6 +39,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 def require_staff(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> StaffAccount:
+    if is_token_revoked(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Staff session has been revoked. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], audience=STAFF_AUDIENCE)
         staff_id = uuid.UUID(payload.get("sub"))

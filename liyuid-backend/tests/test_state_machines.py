@@ -229,3 +229,4 @@ def test_handover_expiry_rejection():
         HandoverStateMachine.check_active_status(h_exp)
     assert exc.value.status_code == 410
     assert "expired" in exc.value.detail
+

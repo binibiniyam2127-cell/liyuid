@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit_event
 from app.core.config import redis_client
 from app.core.dependencies import get_current_user, require_staff
+from app.core.rate_limit import RateLimiter
 from app.core.security import (
     compute_option_token,
     get_password_hash,
@@ -148,7 +149,12 @@ async def verify_photo(
     )
 
 
-@router.post("/{match_id}/verification/proof", response_model=ProofVerificationResponse, tags=["Verification v2"])
+@router.post(
+    "/{match_id}/verification/proof",
+    response_model=ProofVerificationResponse,
+    tags=["Verification v2"],
+    dependencies=[Depends(RateLimiter(limit=10, window_seconds=60, by="user", scope="matches:verification"))],
+)
 def verify_proof(
     match_id: uuid.UUID,
     payload: ProofVerificationRequest,
@@ -222,7 +228,12 @@ def get_verification_question(
     )
 
 
-@router.post("/{match_id}/verification/answer", response_model=AnswerVerificationResponse, tags=["Verification v2"])
+@router.post(
+    "/{match_id}/verification/answer",
+    response_model=AnswerVerificationResponse,
+    tags=["Verification v2"],
+    dependencies=[Depends(RateLimiter(limit=10, window_seconds=60, by="user", scope="matches:verification"))],
+)
 def submit_verification_answer(
     match_id: uuid.UUID,
     payload: AnswerVerificationRequest,

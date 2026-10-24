@@ -32,10 +32,15 @@ SPATIAL_SALT = os.getenv("SPATIAL_SALT", "liyuid_spatial_secret_salt")
 # Celery Client
 celery_client = Celery("liyuid_worker", broker=REDIS_URL)
 
-# Redis Client
+# Redis Client (with fast connect timeout for resilient local fallback)
 try:
     import redis
-    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    redis_client = redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=0.2,
+        socket_timeout=0.2,
+    )
 except Exception:
     redis_client = None
 

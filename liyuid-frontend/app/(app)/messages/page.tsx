@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   SlidersHorizontal,
@@ -38,7 +38,7 @@ export default function MessagesPage() {
   const [escalating, setEscalating] = useState(false);
   const [escalationNotes, setEscationNotes] = useState("");
   const [escalated, setEscalated] = useState(false);
-  const [escalationResult, setEscalationResult] = useState<{ case_id: string; message: string; assigned_desk?: string } | null>(null);
+  const [escalationResult, setEscalationResult] = useState<{ status?: string; case_id: string; message: string; assigned_desk?: string } | null>(null);
   const [isAutoOpened, setIsAutoOpened] = useState(false);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 

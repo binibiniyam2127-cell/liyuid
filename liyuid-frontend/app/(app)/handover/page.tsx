@@ -23,6 +23,7 @@ import {
   X,
   Smartphone,
   MessageSquare,
+  KeyRound,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useT } from "@/lib/locale-context";

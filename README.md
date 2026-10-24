@@ -100,31 +100,35 @@ flowchart TD
 LIYUID/
 ├── liyuid-frontend/             # Next.js 14 Production Frontend (App Router, Tailwind)
 │   ├── app/                     # Citizen portal & /staff municipal workbench
-│   ├── components/              # Modular UI cards, modals, QR scanners
-│   ├── lib/                     # API client, bilingual dictionaries (Amharic/English)
+│   ├── components/              # Modular UI cards, modals, app-shell
+│   ├── features/                # Domain features (api client, auth context & session)
+│   ├── lib/                     # Types and bilingual dictionaries (Amharic/English)
 │   └── vercel.json              # Vercel deployment configuration
 │
 ├── liyuid-backend/              # FastAPI Production Backend Service
+│   ├── alembic/                 # Database migration versions & baseline schema
 │   ├── app/
-│   │   ├── main.py              # Core API endpoints & lifecycle logic
-│   │   ├── models.py            # SQLAlchemy models (pgvector, PostGIS, JSONB)
-│   │   ├── schemas.py           # Pydantic v2 validation contracts
+│   │   ├── core/                # Config, security, session cookies, rate-limiting & audit
+│   │   ├── routers/             # Domain endpoints (auth, reports, matches, handovers, staff, admin)
+│   │   ├── services/            # State machines & business logic (verification, handover, staff)
+│   │   ├── models/              # SQLAlchemy domain models (pgvector, PostGIS, JSONB)
+│   │   ├── schemas/             # Pydantic v2 validation contracts
 │   │   ├── database.py          # PostgreSQL session management with pool pre-ping
-│   │   └── cli.py               # Administrative staff creation CLI
+│   │   └── main.py              # Modular FastAPI orchestrator & lifespan startup
 │   ├── docker/
 │   │   └── init.sql             # Unified PostgreSQL schema (PostGIS + pgvector)
-│   ├── tests/                   # Core Backend Pytest Suite
-│   │   ├── conftest.py          # Test database fixtures & auth headers
-│   │   ├── test_b1_security.py  # RBAC, Amharic NFC, & 3-strike lockout
-│   │   ├── test_b8_privacy_and_rules.py # Zero-PII schemas & anti-harvesting
-│   │   └── test_e2e_pipeline.py # End-to-end verification pipeline
+│   ├── tests/                   # Comprehensive test suite (34 passing tests)
 │   └── requirements.txt         # Optimized CPU wheels & lightweight dependencies
 │
 ├── liyuid-ai-worker/            # Asynchronous ML & Notification Worker Service
-│   ├── tasks.py                 # Celery background tasks (batch embeddings, SMS & Telegram alerts)
+│   ├── tasks/                   # Celery tasks (embeddings, notifications, sanitization, DLQ)
 │   ├── celery_app.py            # Celery distributed task queue configuration
 │   ├── Dockerfile               # Standalone container for background ML worker
 │   └── requirements.txt         # Celery, Redis & ML dependencies
+│
+├── liyuid-evaluation/           # AI Model Benchmarking & Testing Harness
+│   ├── benchmark_eval.py        # Accuracy, recall, & cosine threshold evaluation
+│   └── synthetic_data_generator.py # Test dataset generation for multilingual matching
 │
 ├── test_e2e_http_lifecycle.py   # Full HTTP E2E Blind-Sided Verification Integration Test
 ├── invite_staff.py              # Interactive Municipal Staff Onboarding Tool (with QR)

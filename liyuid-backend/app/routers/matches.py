@@ -312,14 +312,6 @@ def submit_verification_answer(
         db.commit()
         one_time_code = code_6digit
 
-        finder_req = FinderRequest(
-            id=uuid.uuid4(),
-            match_id=match.id,
-            status="new",
-            next_reminder_at=now + timedelta(hours=6),
-        )
-        db.add(finder_req)
-
     log_audit_event(
         db,
         entity_type="match",
@@ -716,6 +708,15 @@ def get_chat_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    lost_item = db.query(Item).filter(Item.id == match.lost_item_id).first()
+    found_item = db.query(Item).filter(Item.id == match.found_item_id).first()
+    if not lost_item or not found_item or current_user.id not in [lost_item.user_id, found_item.user_id]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view chat for this match")
+
     msgs = db.query(ChatMessage).filter(ChatMessage.match_id == match_id).order_by(ChatMessage.created_at.asc()).all()
     results = []
     for m in msgs:

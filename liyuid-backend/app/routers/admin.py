@@ -2,6 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.audit import log_audit_event
 from app.core.dependencies import require_admin
 from app.database import get_db
 from app.models import AuditLog, Item, Match, User
@@ -47,6 +48,20 @@ def resolve_admin_dispute(
     if match_record:
         match_record.verification_attempts = 0
         match_record.is_locked = False
+
+    log_audit_event(
+        db,
+        entity_type="item",
+        entity_id=item.id,
+        actor_id=current_user.id,
+        action="admin_dispute_resolved",
+        severity="high",
+        details={
+            "new_status": new_status,
+            "resolution_notes": payload.get("resolution_notes"),
+            "match_unlocked": bool(match_record),
+        },
+    )
     db.commit()
     return {
         "status": "resolved",

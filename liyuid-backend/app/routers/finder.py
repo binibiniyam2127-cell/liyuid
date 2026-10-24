@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
@@ -24,11 +24,22 @@ def get_finder_requests(db: Session = Depends(get_db), current_user: User = Depe
     )
 
 
-@router.post("/requests/{req_id}/accept")
-def accept_finder_request(req_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def _validate_finder_request_access(req_id: uuid.UUID, current_user: User, db: Session) -> FinderRequest:
     req = db.query(FinderRequest).filter(FinderRequest.id == req_id).first()
     if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    match = db.query(Match).filter(Match.id == req.match_id).first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated match not found")
+    found_item = db.query(Item).filter(Item.id == match.found_item_id).first()
+    if not found_item or found_item.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this finder request")
+    return req
+
+
+@router.post("/requests/{req_id}/accept")
+def accept_finder_request(req_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    req = _validate_finder_request_access(req_id, current_user, db)
     req.status = "accepted"
     db.commit()
     return {"status": "accepted"}
@@ -36,9 +47,7 @@ def accept_finder_request(req_id: uuid.UUID, db: Session = Depends(get_db), curr
 
 @router.post("/requests/{req_id}/defer")
 def defer_finder_request(req_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    req = db.query(FinderRequest).filter(FinderRequest.id == req_id).first()
-    if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+    req = _validate_finder_request_access(req_id, current_user, db)
     req.status = "deferred"
     db.commit()
     return {"status": "deferred"}

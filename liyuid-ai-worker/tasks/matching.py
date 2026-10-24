@@ -2,7 +2,7 @@ import json
 import uuid
 from sqlalchemy import text
 
-from tasks.common import SessionLocal
+from tasks.common import ReliableTask, SessionLocal
 from tasks.config import NOTIFICATION_SCORE_THRESHOLD, app
 from tasks.notifications import dispatch_match_notification
 
@@ -18,8 +18,17 @@ def get_embedding_model():
     return _model
 
 
-@app.task(name="tasks.process_item_embedding_and_match")
-def process_item_embedding_and_match(item_id: str):
+@app.task(
+    name="tasks.process_item_embedding_and_match",
+    base=ReliableTask,
+    bind=True,
+    max_retries=3,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=120,
+    retry_jitter=True,
+)
+def process_item_embedding_and_match(self, item_id: str):
     """
     1. Computes 384-d semantic embedding for the item description.
     2. Runs hybrid PostGIS spatial and cosine similarity search.

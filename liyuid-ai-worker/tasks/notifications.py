@@ -2,6 +2,7 @@ import secrets
 from sqlalchemy import text
 
 from tasks.common import (
+    ReliableTask,
     SessionLocal,
     redis_client,
     send_email_alert,
@@ -11,8 +12,17 @@ from tasks.common import (
 from tasks.config import app
 
 
-@app.task(name="tasks.dispatch_match_notification")
-def dispatch_match_notification(match_id: str):
+@app.task(
+    name="tasks.dispatch_match_notification",
+    base=ReliableTask,
+    bind=True,
+    max_retries=3,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    retry_jitter=True,
+)
+def dispatch_match_notification(self, match_id: str):
     """
     FR-06: Identifies users linked to the match, verifies channels,
     and dispatches timely, privacy-preserving notification alerts via Email, Telegram, and SMS.

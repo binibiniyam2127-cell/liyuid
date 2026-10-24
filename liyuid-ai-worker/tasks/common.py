@@ -6,7 +6,10 @@ from email.mime.text import MIMEText
 from typing import Optional
 
 import redis
-import requests
+try:
+    import requests
+except ImportError:
+    requests = None
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -138,3 +141,91 @@ def send_email_alert(
                 return False
             time.sleep(1.5)
     return False
+
+
+import json
+import logging
+import uuid
+from celery import Task
+from sqlalchemy import text
+
+logger = logging.getLogger("liyuid.worker")
+
+
+class ReliableTask(Task):
+    """Base Celery task providing exponential backoff retries and dead-letter queue routing."""
+
+    abstract = True
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        """Called when all task retries are permanently exhausted (Dead-Letter event)."""
+        logger.critical(
+            "Task %s[%s] permanently failed after all retries! Error: %s",
+            self.name,
+            task_id,
+            exc,
+            exc_info=True,
+        )
+        # 1. Log critical security/operational event to audit_logs in DB
+        try:
+            db = SessionLocal()
+            try:
+                db.execute(
+                    text("""
+                        INSERT INTO audit_logs (id, entity_type, entity_id, actor_id, action, severity, details, created_at)
+                        VALUES (:id, :entity_type, :entity_id, :actor_id, :action, :severity, CAST(:details AS jsonb), NOW())
+                    """),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "entity_type": "worker_task",
+                        "entity_id": str(uuid.uuid4()),
+                        "actor_id": None,
+                        "action": "task_dead_lettered",
+                        "severity": "critical",
+                        "details": json.dumps({
+                            "task_name": self.name,
+                            "task_id": str(task_id),
+                            "error": str(exc),
+                            "args": [str(a) for a in (args or [])],
+                        }),
+                    },
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as db_err:
+            logger.error("Failed to persist dead-letter audit log: %s", db_err)
+
+        # 2. Forward to dead-letter queue for operator quarantine/inspection
+        try:
+            from tasks.config import app
+            app.send_task(
+                "tasks.dead_letter_handler",
+                args=[self.name, str(task_id), [str(a) for a in (args or [])], str(exc)],
+                queue="celery_dead_letter",
+            )
+        except Exception as q_err:
+            logger.error("Failed to route to dead letter queue: %s", q_err)
+
+        super().on_failure(exc, task_id, args, kwargs, einfo)
+
+
+from tasks.config import app
+
+
+@app.task(name="tasks.dead_letter_handler", queue="celery_dead_letter")
+def dead_letter_handler(task_name: str, task_id: str, args: list, error_message: str):
+    """Quarantine handler for tasks that exceeded maximum retry attempts."""
+    logger.warning(
+        "[Dead-Letter Queue] Quarantined task: %s (ID: %s). Args: %s. Error: %s",
+        task_name,
+        task_id,
+        args,
+        error_message,
+    )
+    return {
+        "status": "quarantined",
+        "task_name": task_name,
+        "task_id": task_id,
+        "error": error_message,
+    }

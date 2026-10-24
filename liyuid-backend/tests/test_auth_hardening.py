@@ -137,3 +137,4 @@ def test_get_current_user_cookie_and_bearer_fallback(test_db, sample_user):
         get_current_user(request=req_cookie, token=None, db=test_db)
     assert exc.value.status_code == 401
     assert "revoked" in exc.value.detail
+

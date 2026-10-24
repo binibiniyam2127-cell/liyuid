@@ -1,6 +1,8 @@
 """LIYUID AI Worker Distributed Tasks Package."""
 from tasks.common import (
+    ReliableTask,
     SessionLocal,
+    dead_letter_handler,
     engine,
     redis_client,
     send_email_alert,
@@ -17,6 +19,8 @@ celery_app = app
 __all__ = [
     "app",
     "celery_app",
+    "ReliableTask",
+    "dead_letter_handler",
     "process_item_embedding_and_match",
     "dispatch_match_notification",
     "sanitize_document_image",

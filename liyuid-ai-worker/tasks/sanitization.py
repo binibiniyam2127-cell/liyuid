@@ -1,13 +1,29 @@
 import os
 import re
-from PIL import Image, ImageDraw
-import pytesseract
+try:
+    from PIL import Image, ImageDraw
+except ImportError:
+    Image = None
+    ImageDraw = None
+try:
+    import pytesseract
+except ImportError:
+    pytesseract = None
 
+from tasks.common import ReliableTask
 from tasks.config import app
 
 
-@app.task(name="tasks.sanitize_document_image")
-def sanitize_document_image(raw_image_path: str, output_image_path: str):
+@app.task(
+    name="tasks.sanitize_document_image",
+    base=ReliableTask,
+    bind=True,
+    max_retries=2,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=30,
+)
+def sanitize_document_image(self, raw_image_path: str, output_image_path: str):
     """
     FR-08: Performs OCR scanning, isolates PII sequences (passports, national IDs,
     emails, long numerical/alphanumeric tokens), and writes redacted preview to disk.

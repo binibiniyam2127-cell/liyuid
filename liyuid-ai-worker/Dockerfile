@@ -40,4 +40,4 @@ COPY --chown=appuser:appuser . .
 # 7. Drop privileges from root to appuser
 USER appuser
 
-CMD ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=2"]
+CMD ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=2", "-Q", "default,high_priority,celery_dead_letter"]

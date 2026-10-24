@@ -39,3 +39,4 @@ def send_owner_municipal_intake_sms(
     )
     logger.info(f"[SMS DISPATCH] Sending municipal intake SMS to {owner_phone}: {sms_text}")
     return sms_client.send_sms(owner_phone, sms_text)
+

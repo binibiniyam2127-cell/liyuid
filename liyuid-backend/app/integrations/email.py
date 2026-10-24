@@ -149,3 +149,4 @@ def send_email_notification(to_email: str, subject: str, body: str) -> bool:
     except Exception as e:
         logger.error(f"[EMAIL ERROR] Failed to send email to {to_email}: {e}")
         return False
+

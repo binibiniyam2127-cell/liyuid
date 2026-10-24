@@ -29,3 +29,4 @@ def notify_finder_match_verified(finder_phone: str, finder_chat_id: str | None, 
         logger.info(f"[TELEGRAM NOTIFY] Chat ID {finder_chat_id}: {msg}")
         send_message(finder_chat_id, msg)
     logger.info("[EMAIL NOTIFY] Notification email dispatched.")
+

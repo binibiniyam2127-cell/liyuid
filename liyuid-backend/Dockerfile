@@ -18,5 +18,5 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 # Copy application source code
 COPY . .
 
-# Run uvicorn dynamically regardless of root or subfolder context
-CMD ["sh", "-c", "if [ -d liyuid-backend/app ]; then cd liyuid-backend; fi && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+# Run migrations then uvicorn dynamically regardless of root or subfolder context
+CMD ["sh", "-c", "if [ -d liyuid-backend/app ]; then cd liyuid-backend; fi && alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

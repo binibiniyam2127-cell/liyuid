@@ -29,6 +29,7 @@ from app.core.config import (
     redis_client,
 )
 from app.core.dependencies import get_current_user, require_admin, require_staff
+from app.core.logging import RequestLoggingMiddleware, configure_logging
 from app.core.ml import get_ml_model
 from app.core.security import (
     compute_deterministic_centroid,
@@ -64,46 +65,9 @@ logging.basicConfig(level=logging.INFO)
 # ============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
-            conn.commit()
-        Base.metadata.create_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(
-                text(
-                    "CREATE INDEX IF NOT EXISTS ix_items_text_embedding_hnsw "
-                    "ON items USING hnsw (text_embedding vector_cosine_ops);"
-                )
-            )
-            conn.commit()
-
-        # Ensure default staff supervisor account exists
-        try:
-            with SessionLocal() as db:
-                existing = db.query(StaffAccount).filter(StaffAccount.staff_code == "STF-01").first()
-                if not existing:
-                    default_staff = StaffAccount(
-                        id=uuid.uuid4(),
-                        staff_code="STF-01",
-                        email="staff@liyuid.com",
-                        full_name="Operations Supervisor STF-01",
-                        staff_role="Senior Operations Supervisor",
-                        hashed_password=get_password_hash("StaffPass123!"),
-                        totp_secret_encrypted=encrypt_detail(pyotp.random_base32()),
-                        is_active=True,
-                        failed_attempts=0,
-                        created_by="system_init",
-                    )
-                    db.add(default_staff)
-                    db.commit()
-                    logger.info("Default municipal staff supervisor STF-01 successfully seeded.")
-        except Exception as seed_err:
-            logger.warning("Staff account seeding notice: %s", seed_err)
-    except Exception as exc:
-        logger.warning("Startup DB initialization notice: %s", exc)
+    logger.info("LIYUID Core Backend initialized successfully.")
     yield
+    logger.info("LIYUID Core Backend shutting down.")
 
 
 app = FastAPI(
@@ -112,6 +76,9 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
 )
+
+configure_logging()
+app.add_middleware(RequestLoggingMiddleware)
 
 cors_origins_env = os.getenv("CORS_ORIGINS", "*")
 if cors_origins_env == "*":
@@ -137,42 +104,85 @@ else:
 # Core Health Check Endpoints
 # ============================================================================
 @app.get("/health", tags=["System"])
+@app.get("/health/live", tags=["System"])
 @app.get("/api/health", tags=["System"])
-def health_check():
+def liveness_check():
     """
-    Production health check endpoint for container orchestrators,
-    load balancers (ALB/Nginx/Traefik), and uptime monitors.
+    Fast liveness probe for container orchestrators, load balancers, and uptime monitors.
+    Responds immediately without external I/O blocking.
     """
-    db_status = "connected"
+    return {
+        "status": "alive",
+        "service": "LIYUID Core Backend API",
+        "version": "3.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/health/ready", tags=["System"])
+def readiness_check():
+    """
+    Deep readiness probe verifying database connectivity, PostGIS spatial library,
+    pgvector embeddings, Redis cache connection, and storage volume writeability.
+    """
+    checks = {}
+    is_ready = True
+
+    # 1. Database & Extensions
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1;"))
-    except Exception as exc:
-        db_status = f"error: {str(exc)}"
+            checks["database"] = {"status": "connected"}
 
-    redis_status = "connected"
+            try:
+                postgis_ver = conn.execute(text("SELECT PostGIS_Lib_Version();")).scalar()
+                checks["postgis"] = {"status": "installed", "version": str(postgis_ver)}
+            except Exception as e:
+                checks["postgis"] = {"status": "missing_or_error", "detail": str(e)}
+
+            try:
+                has_vector = conn.execute(
+                    text("SELECT 1 FROM pg_extension WHERE extname = 'vector';")
+                ).scalar()
+                checks["pgvector"] = {
+                    "status": "installed" if has_vector else "extension_not_created"
+                }
+            except Exception as e:
+                checks["pgvector"] = {"status": "error", "detail": str(e)}
+    except Exception as exc:
+        checks["database"] = {"status": "error", "detail": str(exc)}
+        is_ready = False
+
+    # 2. Redis Cache
     try:
         if redis_client is not None and redis_client.ping():
-            redis_status = "connected"
+            checks["redis"] = {"status": "connected"}
         else:
-            redis_status = "disconnected"
+            checks["redis"] = {"status": "disconnected", "fallback": "in-memory"}
     except Exception as exc:
-        redis_status = f"error: {str(exc)}"
+        checks["redis"] = {"status": "error", "detail": str(exc), "fallback": "in-memory"}
 
-    is_healthy = "error" not in db_status
-    status_code = status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    # 3. Storage Directories
+    raw_ok = os.access(RAW_DIR, os.W_OK)
+    sanitized_ok = os.access(SANITIZED_DIR, os.W_OK)
+    storage_ok = raw_ok and sanitized_ok
+    checks["storage"] = {
+        "quarantine_raw": "writable" if raw_ok else "unwritable",
+        "sanitized_public": "writable" if sanitized_ok else "unwritable",
+    }
+    if not storage_ok:
+        is_ready = False
+
+    status_code = status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return JSONResponse(
         status_code=status_code,
         content={
-            "status": "healthy" if is_healthy else "degraded",
+            "status": "ready" if is_ready else "not_ready",
             "version": "3.0.0",
             "environment": os.getenv("ENVIRONMENT", "production"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "services": {
-                "database": db_status,
-                "redis": redis_status,
-            },
+            "checks": checks,
         },
     )
 

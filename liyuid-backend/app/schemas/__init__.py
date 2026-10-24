@@ -1,4 +1,5 @@
 from app.schemas.auth import (
+    RefreshTokenRequest,
     StaffLoginRequest,
     Token,
     UserRegister,
@@ -52,6 +53,7 @@ __all__ = [
     "VerifyOtpRequest",
     "UserResponse",
     "Token",
+    "RefreshTokenRequest",
     "StaffLoginRequest",
     # Reports
     "ReportCreate",

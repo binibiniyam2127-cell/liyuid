@@ -12,7 +12,7 @@ export class ApiError extends Error {
   }
 }
 
-// Token management
+// Token management (kept as fallback for environments without cookies)
 const TOKEN_KEY = "liyuid_user_token";
 const STAFF_TOKEN_KEY = "liyuid_staff_token";
 
@@ -44,6 +44,8 @@ export function setStaffToken(token: string | null) {
   }
 }
 
+let isRefreshing = false;
+
 export async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -66,10 +68,48 @@ export async function request<T>(
   try {
     response = await fetch(url, {
       ...options,
+      credentials: "include",
       headers,
     });
   } catch (err: any) {
     throw new ApiError(0, "Network connection error. Is the backend server running?", err);
+  }
+
+  // Automatic refresh on 401 if not already refreshing or attempting auth routes
+  if (
+    response.status === 401 &&
+    !isRefreshing &&
+    !endpoint.startsWith("/auth/token") &&
+    !endpoint.startsWith("/auth/refresh") &&
+    !endpoint.startsWith("/auth/logout")
+  ) {
+    isRefreshing = true;
+    try {
+      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        if (refreshData?.access_token) {
+          setToken(refreshData.access_token);
+          headers.set("Authorization", `Bearer ${refreshData.access_token}`);
+        }
+        // Retry the original request
+        response = await fetch(url, {
+          ...options,
+          credentials: "include",
+          headers,
+        });
+      } else {
+        setToken(null);
+      }
+    } catch {
+      setToken(null);
+    } finally {
+      isRefreshing = false;
+    }
   }
 
   if (!response.ok) {

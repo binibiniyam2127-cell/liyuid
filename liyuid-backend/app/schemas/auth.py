@@ -47,7 +47,13 @@ class UserResponse(BaseModel):
 
 class Token(BaseModel):
     access_token: str
-    token_type: str
+    token_type: str = "bearer"
+    refresh_token: Optional[str] = None
+    expires_in: Optional[int] = None
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: Optional[str] = None
 
 
 class StaffLoginRequest(BaseModel):
@@ -61,5 +67,6 @@ __all__ = [
     "VerifyOtpRequest",
     "UserResponse",
     "Token",
+    "RefreshTokenRequest",
     "StaffLoginRequest",
 ]

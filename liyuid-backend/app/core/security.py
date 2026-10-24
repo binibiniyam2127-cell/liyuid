@@ -12,6 +12,7 @@ from passlib.context import CryptContext
 from app.core.config import (
     ALGORITHM,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     SECRET_KEY,
     SPATIAL_SALT,
     SUB_CITY_CENTROIDS,
@@ -21,6 +22,7 @@ from app.schemas import SubCityEnum
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="auth/token", auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -42,6 +44,27 @@ def create_jwt_token(
     )
     to_encode.update({"exp": expire, "aud": audience, "iat": datetime.now(timezone.utc)})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_refresh_token(
+    user_id: str,
+    audience: str = USER_AUDIENCE,
+    expires_delta: Optional[timedelta] = None,
+) -> tuple[str, str]:
+    """Generates a long-lived refresh token with unique jti identifier."""
+    jti = str(uuid.uuid4())
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+    to_encode = {
+        "sub": str(user_id),
+        "jti": jti,
+        "token_type": "refresh",
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+        "aud": audience,
+    }
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM), jti
 
 
 def compute_proof_hash(val: str) -> str:

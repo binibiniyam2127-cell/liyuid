@@ -20,7 +20,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "ci_testing_secret_key_liyuid_super_secure_
 ALGORITHM = "HS256"
 USER_AUDIENCE = "liyuid:user"
 STAFF_AUDIENCE = "liyuid:staff"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+COOKIE_SECURE = os.getenv("ENVIRONMENT", "production").lower() not in ("development", "test", "testing") and not os.getenv("TESTING")
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", None)
 
 ENCRYPTION_KEY_HEX = os.getenv(
     "AES_GCM_ENCRYPTION_KEY",

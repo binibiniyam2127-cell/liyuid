@@ -1,5 +1,5 @@
 import { TokenResponse, UserRegister, UserResponse } from "@/lib/types";
-import { request, setToken } from "./client";
+import { request, setStaffToken, setToken } from "./client";
 
 export const authApi = {
   async register(payload: UserRegister): Promise<UserResponse> {
@@ -22,12 +22,36 @@ export const authApi = {
       body: formData.toString(),
     });
 
-    setToken(data.access_token);
+    if (data?.access_token) {
+      setToken(data.access_token);
+    }
     return data;
   },
 
-  logout() {
-    setToken(null);
+  async logout(): Promise<void> {
+    try {
+      await request("/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      setToken(null);
+      setStaffToken(null);
+    }
+  },
+
+  async refreshToken(refreshToken?: string): Promise<TokenResponse> {
+    const data = await request<TokenResponse>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify(refreshToken ? { refresh_token: refreshToken } : {}),
+    });
+    if (data?.access_token) {
+      setToken(data.access_token);
+    }
+    return data;
+  },
+
+  async getMe(): Promise<UserResponse> {
+    return request<UserResponse>("/auth/me", { method: "GET" });
   },
 
   async verifyOtp(code: string): Promise<{ status: string; message: string; phone_verified?: boolean; email_verified?: boolean }> {

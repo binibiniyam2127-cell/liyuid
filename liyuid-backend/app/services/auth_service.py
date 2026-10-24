@@ -3,6 +3,7 @@ import random
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import jwt
 import pyotp
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_
@@ -12,11 +13,20 @@ from sqlalchemy.orm import Session
 from app.core.audit import log_audit_event
 from app.core.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    ALGORITHM,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    SECRET_KEY,
     STAFF_AUDIENCE,
     USER_AUDIENCE,
     redis_client,
 )
-from app.core.security import create_jwt_token, get_password_hash, verify_password
+from app.core.security import (
+    create_jwt_token,
+    create_refresh_token,
+    get_password_hash,
+    verify_password,
+)
+from app.core.session import is_token_revoked, revoke_token
 from app.models import StaffAccount, User
 from app.notifications import email_client
 from app.schemas import StaffLoginRequest, UserRegister, VerifyOtpRequest
@@ -116,7 +126,94 @@ def authenticate_user(raw_identifier: str, password: str, db: Session) -> dict:
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         audience=USER_AUDIENCE,
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token, jti = create_refresh_token(
+        user_id=str(user.id),
+        audience=USER_AUDIENCE,
+        expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
+def rotate_refresh_token(refresh_token: str, db: Session) -> dict:
+    if is_token_revoked(refresh_token):
+        logger.warning("Attempted use of revoked refresh token! Potential token replay attack.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has expired or was revoked. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = jwt.decode(
+            refresh_token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            audience=USER_AUDIENCE,
+        )
+        if payload.get("token_type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Provided token is not a valid refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token claims",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user_id = uuid.UUID(user_id_str)
+    except (jwt.PyJWTError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid refresh token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account no longer active",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 1. Immediately revoke used refresh token to prevent replay
+    revoke_token(refresh_token)
+
+    # 2. Issue rotated keypair
+    new_access_token = create_jwt_token(
+        data={"sub": str(user.id)},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+        audience=USER_AUDIENCE,
+    )
+    new_refresh_token, new_jti = create_refresh_token(
+        user_id=str(user.id),
+        audience=USER_AUDIENCE,
+        expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+
+    log_audit_event(
+        db,
+        entity_type="auth",
+        entity_id=user.id,
+        action="refresh_token_rotated",
+        severity="info",
+        actor_id=user.id,
+    )
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
 
 
 def verify_user_otp(payload: VerifyOtpRequest, current_user: User, db: Session) -> dict:

@@ -1,9 +1,15 @@
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
+from app.core.config import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    COOKIE_DOMAIN,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+)
 from app.core.dependencies import require_staff
 from app.database import get_db
 from app.models import Flag, StaffAccount
@@ -14,8 +20,24 @@ router = APIRouter(prefix="/staff", tags=["Staff"])
 
 
 @router.post("/auth/login")
-def staff_login(payload: StaffLoginRequest, db: Session = Depends(get_db)):
-    return auth_service.authenticate_staff(payload, db)
+def staff_login(
+    response: Response,
+    payload: StaffLoginRequest,
+    db: Session = Depends(get_db),
+):
+    res = auth_service.authenticate_staff(payload, db)
+    if isinstance(res, dict) and "access_token" in res:
+        response.set_cookie(
+            key="staff_access_token",
+            value=res["access_token"],
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite=COOKIE_SAMESITE,
+            domain=COOKIE_DOMAIN,
+            path="/",
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+    return res
 
 
 @router.get("/me")

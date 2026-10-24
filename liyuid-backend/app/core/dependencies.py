@@ -1,30 +1,40 @@
 import uuid
+from typing import Optional
+
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.audit import log_audit_event
 from app.core.config import ALGORITHM, SECRET_KEY, STAFF_AUDIENCE, USER_AUDIENCE
-from app.core.security import oauth2_scheme
+from app.core.security import oauth2_scheme, oauth2_scheme_optional
 from app.core.session import is_token_revoked
 from app.database import get_db
 from app.models import StaffAccount, User
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def get_current_user(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    if is_token_revoked(token):
+    auth_token = token or request.cookies.get("access_token")
+    if not auth_token:
+        raise credentials_exception
+
+    if is_token_revoked(auth_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session has been revoked. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], audience=USER_AUDIENCE)
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM], audience=USER_AUDIENCE)
         user_id_str: str = payload.get("sub")
         if user_id_str is None:
             raise credentials_exception
@@ -38,15 +48,26 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-def require_staff(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> StaffAccount:
-    if is_token_revoked(token):
+def require_staff(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: Session = Depends(get_db),
+) -> StaffAccount:
+    auth_token = token or request.cookies.get("staff_access_token") or request.cookies.get("access_token")
+    if not auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Staff credentials required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if is_token_revoked(auth_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Staff session has been revoked. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], audience=STAFF_AUDIENCE)
+        payload = jwt.decode(auth_token, SECRET_KEY, algorithms=[ALGORITHM], audience=STAFF_AUDIENCE)
         staff_id = uuid.UUID(payload.get("sub"))
     except (jwt.PyJWTError, ValueError):
         log_audit_event(

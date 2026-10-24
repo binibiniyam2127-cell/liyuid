@@ -13,8 +13,18 @@ import socket
 from typing import Optional, Set
 
 import jwt
+from fastapi import Response
 
-from app.core.config import ALGORITHM, SECRET_KEY, redis_client
+from app.core.config import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    ALGORITHM,
+    COOKIE_DOMAIN,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+    SECRET_KEY,
+    redis_client,
+)
 
 logger = logging.getLogger("liyuid.security.session")
 
@@ -93,3 +103,40 @@ def is_token_revoked(token: str) -> bool:
 
     # 2. Check in-memory fallback
     return token_hash in _memory_revocation_cache
+
+
+def set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: Optional[str] = None,
+) -> None:
+    """Sets secure httpOnly cookies for access and refresh tokens."""
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        domain=COOKIE_DOMAIN,
+        path="/",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    if refresh_token:
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite=COOKIE_SAMESITE,
+            domain=COOKIE_DOMAIN,
+            path="/auth",
+            max_age=REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        )
+
+
+def clear_auth_cookies(response: Response) -> None:
+    """Clears authentication cookies."""
+    response.delete_cookie(key="access_token", path="/", domain=COOKIE_DOMAIN)
+    response.delete_cookie(key="refresh_token", path="/auth", domain=COOKIE_DOMAIN)
+    response.delete_cookie(key="staff_access_token", path="/", domain=COOKIE_DOMAIN)
+

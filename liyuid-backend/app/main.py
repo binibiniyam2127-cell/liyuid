@@ -36,6 +36,7 @@ from app.core.security import (
     compute_option_token,
     compute_proof_hash,
     create_jwt_token,
+    create_refresh_token,
     get_password_hash,
     oauth2_scheme,
     pwd_context,
@@ -223,6 +224,7 @@ app.include_router(settings.router)
 __all__ = [
     "app",
     "create_jwt_token",
+    "create_refresh_token",
     "get_password_hash",
     "verify_password",
     "USER_AUDIENCE",

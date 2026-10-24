@@ -76,3 +76,4 @@ def test_alembic_scripts_directory():
     heads = script.get_heads()
     assert len(heads) == 1
     assert heads[0] == "0db7b3778fde"
+

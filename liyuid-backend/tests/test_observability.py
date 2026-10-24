@@ -36,3 +36,4 @@ def test_request_id_propagation():
     response = client.get("/health", headers={"X-Request-ID": custom_id})
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == custom_id
+

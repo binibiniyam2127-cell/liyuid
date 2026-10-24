@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { api, getToken, setToken } from "@/lib/api";
+import { api, setToken } from "@/lib/api";
 import { UserRegister, UserSettingsResponse } from "@/lib/types";
 import { AuthContext, AuthContextType, useAuth } from "./useAuth";
 
@@ -16,19 +16,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await api.getSettings();
       setUser(profile);
     } catch {
-      // Token might be invalid or expired
+      // Session might be invalid or expired
       setToken(null);
       setUser(null);
     }
   };
 
   useEffect(() => {
-    const existingToken = getToken();
-    if (existingToken) {
-      fetchProfile().finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
+    // Attempt profile fetch using secure httpOnly cookies or token fallback
+    fetchProfile().finally(() => setIsLoading(false));
   }, []);
 
   const login = async (emailOrPhone: string, pass: string) => {
@@ -43,15 +39,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await fetchProfile();
   };
 
-  const logout = () => {
-    api.logout();
-    setUser(null);
+  const logout = async () => {
+    try {
+      await api.logout();
+    } finally {
+      setUser(null);
+    }
   };
 
   const refreshUser = async () => {
-    if (getToken()) {
-      await fetchProfile();
-    }
+    await fetchProfile();
   };
 
   return (

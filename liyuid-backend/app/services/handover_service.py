@@ -19,6 +19,7 @@ from app.schemas import (
     NotifyMunicipalDropoffPayload,
     NotifyMunicipalDropoffResponse,
 )
+from app.services.handover_state_machine import HandoverState, HandoverStateMachine
 
 logger = logging.getLogger("liyuid.backend")
 
@@ -64,17 +65,12 @@ def confirm_handover(
     current_user: User,
     db: Session,
 ) -> Handover:
-    handover = db.query(Handover).filter(Handover.id == handover_id).with_for_update().first()
-    if not handover or handover.status not in ["open", "municipal_secured", "closed"]:
-        raise HTTPException(status_code=400, detail="Handover not in open state")
-
-    now = datetime.now(timezone.utc)
-    if handover.status != "closed" and handover.expires_at and handover.expires_at < now:
-        raise HTTPException(status_code=410, detail="Handover code has expired")
-
-    match = db.query(Match).filter(Match.id == handover.match_id).first()
-    lost_item = db.query(Item).filter(Item.id == match.lost_item_id).first() if match else None
-    found_item = db.query(Item).filter(Item.id == match.found_item_id).first() if match else None
+    handover, match, lost_item, found_item = HandoverStateMachine.acquire_locked_handover(handover_id, db)
+    
+    # 1. Check active status (idempotency, lockouts, expiry)
+    HandoverStateMachine.check_active_status(handover)
+    if handover.status == HandoverState.CLOSED.value:
+        return handover
 
     input_code = (payload.finder_code or payload.handover_code) if payload else None
     role_hint = (payload.role.strip().lower() if payload and payload.role else None)
@@ -84,52 +80,35 @@ def confirm_handover(
 
     if is_finder:
         if input_code:
-            if not verify_password(input_code.strip().upper(), handover.handover_code_hash) and not verify_password(input_code.strip(), handover.handover_code_hash):
-                handover.code_attempts += 1
-                if handover.code_attempts >= 3:
-                    handover.status = "closed"
-                    db.add(
-                        Flag(
-                            id=uuid.uuid4(),
-                            target_entity="handover",
-                            entity_id=handover.id,
-                            reason="Too many wrong handover codes (3 failures)",
-                            status="pending",
-                        )
-                    )
-                    db.commit()
-                    raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Handover locked due to invalid attempts")
-                db.commit()
+            is_valid = HandoverStateMachine.record_code_attempt(handover, input_code, db, current_user.id)
+            if not is_valid:
                 raise HTTPException(status_code=400, detail="Invalid handover code")
         handover.finder_confirmed = True
 
     elif is_owner:
         handover.owner_confirmed = True
     else:
-        # Default fallback if roles don't match strictly
         handover.owner_confirmed = True
 
+    # 2. State transition via state machine
+    HandoverStateMachine.transition_confirmation(
+        handover=handover,
+        is_owner=is_owner,
+        is_finder=is_finder,
+        db=db,
+        actor_id=current_user.id,
+    )
+
     if handover.owner_confirmed and handover.finder_confirmed:
-        handover.status = "closed"
-        handover.completed_at = now
         if match:
             match.lock_state = "locked"
         if lost_item:
             lost_item.status = "resolved_closed"
         if found_item:
             found_item.status = "resolved_closed"
+        db.commit()
 
     handover.is_fully_closed = bool(handover.owner_confirmed and handover.finder_confirmed)
-
-    log_audit_event(
-        db,
-        entity_type="handover",
-        entity_id=handover.id,
-        actor_id=current_user.id,
-        action="handover_confirmed",
-        severity="info",
-    )
-    db.commit()
     return handover
 
 

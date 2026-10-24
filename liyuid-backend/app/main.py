@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
         with engine.connect() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
+            conn.commit()
         Base.metadata.create_all(bind=engine)
         with engine.connect() as conn:
             conn.execute(
@@ -76,44 +77,6 @@ async def lifespan(app: FastAPI):
                     "ON items USING hnsw (text_embedding vector_cosine_ops);"
                 )
             )
-            # Defensive column additions for users
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_state VARCHAR(32) DEFAULT 'not_connected';"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_link_code VARCHAR(64);"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_link_expires_at TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'user';"))
-
-            # Defensive column additions for items
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS sub_city VARCHAR(64);"))
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS proof_kind VARCHAR(32);"))
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS proof_primary_hash VARCHAR(64);"))
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS private_detail_encrypted BYTEA;"))
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS date_from TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS date_to TIMESTAMPTZ;"))
-
-            # Defensive column additions for matches
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS verification_attempts INT DEFAULT 0;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS photo_result VARCHAR(16) DEFAULT 'none';"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS proof_passed BOOLEAN DEFAULT FALSE;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS question_passed BOOLEAN DEFAULT FALSE;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS proof_attempts INT DEFAULT 0;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS question_attempts INT DEFAULT 0;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE matches ADD COLUMN IF NOT EXISTS lock_state VARCHAR(32) DEFAULT 'none';"))
-
-            # Defensive column additions for handovers
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'open';"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS venue VARCHAR(32) DEFAULT 'direct';"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS station_location VARCHAR(255);"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS vault_locker VARCHAR(64);"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS deposit_voucher VARCHAR(64);"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS municipal_notes TEXT;"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS regenerate_count INT DEFAULT 0;"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS code_attempts INT DEFAULT 0;"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;"))
-            conn.execute(text("ALTER TABLE handovers ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;"))
             conn.commit()
 
         # Ensure default staff supervisor account exists

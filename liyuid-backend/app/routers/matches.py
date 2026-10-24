@@ -62,6 +62,11 @@ from app.schemas import (
     VerificationStateResponse,
 )
 from app.services import handover_service
+from app.services.handover_state_machine import HandoverStateMachine
+from app.services.verification_state_machine import (
+    VerificationState,
+    VerificationStateMachine,
+)
 from app.verification_service import (
     check_and_flag_user_abuse,
     check_proof_match,
@@ -82,29 +87,17 @@ def get_verification_state(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, lost_item, found_item = get_match_and_validate_owner(match_id, current_user.id, db)
+    match, lost_item, found_item = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
     now = datetime.now(timezone.utc)
     cooldown_left = max(0, int((match.cooldown_until - now).total_seconds())) if match.cooldown_until else 0
-
-    if match.is_locked or match.lock_state == "locked":
-        step = "locked"
-    elif match.lock_state == "review_requested":
-        step = "review_requested"
-    elif match.proof_passed and match.question_passed:
-        step = "passed"
-    elif match.photo_result == "none":
-        step = "photo"
-    elif not match.proof_passed:
-        step = "proof"
-    else:
-        step = "question"
+    state = VerificationStateMachine.get_current_state(match)
 
     handover = db.query(Handover).filter(Handover.match_id == match.id).first()
     handover_id = handover.id if handover else None
 
     return VerificationStateResponse(
         match_id=match.id,
-        step=step,
+        step=state.value,
         photo_result=match.photo_result,
         proof_kind=found_item.proof_kind,
         proof_attempts_remaining=max(0, 3 - match.proof_attempts),
@@ -121,9 +114,8 @@ async def verify_photo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, _, _ = get_match_and_validate_owner(match_id, current_user.id, db)
-    if match.is_locked or match.lock_state == "locked":
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Verification is locked for this match.")
+    match, _, _ = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
+    VerificationStateMachine.check_preconditions(match, VerificationState.PHOTO_PENDING)
 
     contents = await file.read()
     res_label = photo_provider.compare(contents, None)
@@ -163,17 +155,17 @@ def verify_proof(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, _, found_item = get_match_and_validate_owner(match_id, current_user.id, db)
-    if match.is_locked or match.lock_state == "locked":
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Verification is locked for this match.")
+    match, lost_item, found_item = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
 
     if match.proof_passed:
         return ProofVerificationResponse(
             proof_passed=True,
-            proof_attempts_remaining=3 - match.proof_attempts,
+            proof_attempts_remaining=max(0, 3 - match.proof_attempts),
             next_step="question",
             message="Proof has already passed.",
         )
+
+    VerificationStateMachine.check_preconditions(match, VerificationState.PROOF_PENDING)
 
     is_valid = check_proof_match(
         kind=found_item.proof_kind or "other",
@@ -182,57 +174,26 @@ def verify_proof(
         target_truth=found_item.private_challenge_truth,
     )
 
-    if not is_valid:
-        match.proof_attempts += 1
-        log_audit_event(
-            db,
-            entity_type="match",
-            entity_id=match.id,
-            actor_id=current_user.id,
-            action="verification_proof_failed",
-            severity="warning",
-            details={"attempts": match.proof_attempts},
-        )
-        if match.proof_attempts >= 3:
-            match.is_locked = True
-            match.lock_state = "locked"
-            db.add(
-                Flag(
-                    id=uuid.uuid4(),
-                    target_entity="match",
-                    entity_id=match.id,
-                    reason="Proof locked: 3 failed attempts",
-                    status="pending",
-                )
-            )
-            db.commit()
-            check_and_flag_user_abuse(db, current_user.id)
-            raise HTTPException(
-                status_code=status.HTTP_423_LOCKED,
-                detail="Verification locked due to 3 failed proof attempts.",
-            )
+    VerificationStateMachine.record_proof_attempt_result(
+        match=match,
+        lost_item=lost_item,
+        is_success=is_valid,
+        db=db,
+        actor_id=current_user.id,
+    )
 
-        db.commit()
+    if not is_valid:
+        check_and_flag_user_abuse(db, current_user.id)
         return ProofVerificationResponse(
             proof_passed=False,
-            proof_attempts_remaining=3 - match.proof_attempts,
+            proof_attempts_remaining=max(0, 3 - match.proof_attempts),
             next_step="proof",
             message="Proof does not match.",
         )
 
-    match.proof_passed = True
-    log_audit_event(
-        db,
-        entity_type="match",
-        entity_id=match.id,
-        actor_id=current_user.id,
-        action="verification_proof_passed",
-        severity="info",
-    )
-    db.commit()
     return ProofVerificationResponse(
         proof_passed=True,
-        proof_attempts_remaining=3 - match.proof_attempts,
+        proof_attempts_remaining=max(0, 3 - match.proof_attempts),
         next_step="question",
         message="Proof verified successfully.",
     )
@@ -244,12 +205,8 @@ def get_verification_question(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, _, found_item = get_match_and_validate_owner(match_id, current_user.id, db)
-    if match.is_locked or match.lock_state == "locked":
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Verification is locked.")
-
-    if not match.proof_passed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must pass proof before answering question.")
+    match, _, found_item = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
+    VerificationStateMachine.check_preconditions(match, VerificationState.QUESTION_PENDING)
 
     real_text = decrypt_detail(found_item.private_detail_encrypted) or found_item.private_challenge_truth or "Correct Secret"
     decoys = db.query(OptionDecoy.text).filter(OptionDecoy.category == found_item.category).limit(10).all()
@@ -273,70 +230,75 @@ def submit_verification_answer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, _, found_item = get_match_and_validate_owner(match_id, current_user.id, db)
-    now = datetime.now(timezone.utc)
-
-    if match.cooldown_until and match.cooldown_until > now:
-        left = int((match.cooldown_until - now).total_seconds())
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Cooldown active. Wait {left} seconds.")
-
-    if match.is_locked or match.lock_state == "locked":
-        raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Claim is locked.")
+    match, _, found_item = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
+    VerificationStateMachine.check_preconditions(match, VerificationState.QUESTION_PENDING)
 
     real_text = decrypt_detail(found_item.private_detail_encrypted) or found_item.private_challenge_truth or "Correct Secret"
     correct_token = compute_option_token(match.id, real_text)
+    is_valid = secrets.compare_digest(payload.option_id, correct_token)
 
-    if not secrets.compare_digest(payload.option_id, correct_token):
-        match.question_attempts += 1
-        match.cooldown_until = now + timedelta(seconds=5)
-        log_audit_event(
-            db,
-            entity_type="match",
-            entity_id=match.id,
-            actor_id=current_user.id,
-            action="verification_question_failed",
-            severity="warning",
-            details={"attempts": match.question_attempts},
-        )
-        if match.question_attempts >= 3:
-            match.is_locked = True
-            match.lock_state = "locked"
-            db.add(Flag(id=uuid.uuid4(), target_entity="match", entity_id=match.id, reason="Question locked: 3 failed attempts", status="pending"))
-            db.commit()
-            check_and_flag_user_abuse(db, current_user.id)
-            raise HTTPException(status_code=status.HTTP_423_LOCKED, detail="Claim locked due to 3 failed question attempts.")
+    VerificationStateMachine.record_question_attempt_result(
+        match=match,
+        is_success=is_valid,
+        db=db,
+        actor_id=current_user.id,
+    )
 
-        db.commit()
+    if not is_valid:
+        check_and_flag_user_abuse(db, current_user.id)
         return AnswerVerificationResponse(
             question_passed=False,
-            question_attempts_remaining=3 - match.question_attempts,
+            question_attempts_remaining=max(0, 3 - match.question_attempts),
             cooldown_seconds_remaining=5,
             status="failed",
             message="Incorrect option selected.",
         )
 
-    match.question_passed = True
+    # Success: Single active handover guarantee
+    now = datetime.now(timezone.utc)
     handover_id = None
     one_time_code = None
 
     if match.proof_passed and match.photo_result != "weak":
-        match.is_verified = True
         match.claimant_id = current_user.id
-
         code_6digit = f"{secrets.randbelow(900000) + 100000}"
-        handover = Handover(
-            id=uuid.uuid4(),
-            match_id=match.id,
-            handover_code_hash=get_password_hash(code_6digit),
-            owner_confirmed=False,
-            finder_confirmed=False,
-            status="open",
-            expires_at=now + timedelta(minutes=10),
-            regenerate_count=0,
-            code_attempts=0,
-        )
-        db.add(handover)
-        handover_id = handover.id
+        code_hash = get_password_hash(code_6digit)
+
+        existing_handover = HandoverStateMachine.ensure_single_active_handover(match.id, db)
+        if existing_handover:
+            existing_handover.handover_code_hash = code_hash
+            existing_handover.status = "open"
+            existing_handover.expires_at = now + timedelta(minutes=10)
+            existing_handover.code_attempts = 0
+            handover_id = existing_handover.id
+        else:
+            handover = Handover(
+                id=uuid.uuid4(),
+                match_id=match.id,
+                handover_code_hash=code_hash,
+                owner_confirmed=False,
+                finder_confirmed=False,
+                status="open",
+                expires_at=now + timedelta(minutes=10),
+                regenerate_count=0,
+                code_attempts=0,
+            )
+            db.add(handover)
+            handover_id = handover.id
+
+        one_time_code = code_6digit
+
+        finder_req = db.query(FinderRequest).filter(FinderRequest.match_id == match.id).first()
+        if not finder_req:
+            finder_req = FinderRequest(
+                id=uuid.uuid4(),
+                match_id=match.id,
+                status="new",
+                next_reminder_at=now + timedelta(hours=6),
+            )
+            db.add(finder_req)
+
+        db.commit()
         one_time_code = code_6digit
 
         finder_req = FinderRequest(
@@ -375,27 +337,13 @@ def request_verification_review(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    match, _, _ = get_match_and_validate_owner(match_id, current_user.id, db)
-    match.lock_state = "review_requested"
-    flag = Flag(
-        id=uuid.uuid4(),
-        target_entity="match",
-        entity_id=match.id,
-        flagged_by_id=current_user.id,
+    match, _, _ = VerificationStateMachine.acquire_locked_match(match_id, current_user.id, db)
+    VerificationStateMachine.request_review(
+        match=match,
         reason=payload.reason,
-        status="pending",
-    )
-    db.add(flag)
-    log_audit_event(
-        db,
-        entity_type="match",
-        entity_id=match.id,
+        db=db,
         actor_id=current_user.id,
-        action="verification_review_requested",
-        severity="info",
-        details={"reason": payload.reason},
     )
-    db.commit()
     return ReviewRequestResponse(
         status="review_requested",
         message="Your review request has been submitted to staff.",

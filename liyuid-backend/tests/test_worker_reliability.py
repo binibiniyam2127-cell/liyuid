@@ -64,3 +64,4 @@ def test_dead_letter_quarantine_handler():
     assert result["task_name"] == "tasks.process_item_embedding_and_match"
     assert result["task_id"] == "mock-task-uuid-456"
     assert "database outage" in result["error"]
+

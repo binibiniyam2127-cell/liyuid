@@ -188,3 +188,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_severity ON audit_logs(severity);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+
+-- 11. Alembic Baseline Version Stamp
+CREATE TABLE IF NOT EXISTS alembic_version (
+    version_num VARCHAR(32) NOT NULL,
+    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+);
+INSERT INTO alembic_version (version_num) VALUES ('0db7b3778fde') ON CONFLICT (version_num) DO NOTHING;

@@ -26,6 +26,13 @@ def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "postgis";')
     op.execute('CREATE EXTENSION IF NOT EXISTS "vector";')
 
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_tables = inspector.get_table_names()
+    if 'users' in existing_tables:
+        # Schema already initialized by init.sql - baseline is present
+        return
+
     # 2. Table: users
     op.create_table(
         'users',

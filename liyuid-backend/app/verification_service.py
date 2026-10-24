@@ -15,7 +15,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AuditLog, Flag, Item, Match, OptionDecoy, User
+from fastapi import HTTPException, status
+from app.core.audit import log_audit_event
+from app.core.security import get_password_hash
+from app.models import AuditLog, Flag, Handover, Item, Match, OptionDecoy, User
 
 USER_FAIL_LOCK_THRESHOLD = int(os.getenv("USER_FAIL_LOCK_THRESHOLD", "3"))
 ENCRYPTION_KEY_HEX = os.getenv(
@@ -128,3 +131,188 @@ def check_and_flag_user_abuse(db: Session, user_id: uuid.UUID):
             )
             db.add(flag)
             db.commit()
+
+
+
+def get_match_and_validate_owner(match_id: uuid.UUID, user_id: uuid.UUID, db: Session):
+    match = db.query(Match).filter(Match.id == match_id).with_for_update().first()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    lost_item = db.query(Item).filter(Item.id == match.lost_item_id).first()
+    found_item = db.query(Item).filter(Item.id == match.found_item_id).first()
+
+    if not lost_item or not found_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated items not found")
+
+    if lost_item.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the registered owner of this lost item can perform verification.",
+        )
+    return match, lost_item, found_item
+
+
+def get_report_challenge(item_id: uuid.UUID, db: Session) -> dict:
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {
+        "item_id": str(item.id),
+        "challenge_type": item.challenge_type or "deterministic_proof",
+        "challenge_question": item.challenge_question or "Please verify a private characteristic of this item.",
+    }
+
+
+def verify_item_claim(
+    item_id: uuid.UUID,
+    challenge_attempt: str,
+    current_user: User,
+    db: Session,
+) -> dict:
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Finder attempting to claim their own found item
+    if item.type == "found" and item.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot claim an item you reported as found.",
+        )
+
+    # Find active match record linking user or items
+    match_record = db.query(Match).filter(
+        (Match.found_item_id == item.id) | (Match.lost_item_id == item.id)
+    ).first()
+
+    counterpart = None
+    if match_record:
+        counterpart_id = match_record.lost_item_id if item.type == "found" else match_record.found_item_id
+        counterpart = db.query(Item).filter(Item.id == counterpart_id).first()
+    else:
+        counterpart_type = "found" if item.type == "lost" else "lost"
+        counterpart = db.query(Item).filter(
+            Item.type == counterpart_type,
+            Item.category == item.category,
+            Item.status.in_(["active", "embedding_pending"]),
+        ).first()
+        if counterpart:
+            match_record = Match(
+                id=uuid.uuid4(),
+                lost_item_id=item.id if item.type == "lost" else counterpart.id,
+                found_item_id=counterpart.id if item.type == "lost" else item.id,
+                composite_score=0.90,
+                score_breakdown={"semantic": 0.90},
+                verification_attempts=0,
+                is_verified=False,
+                is_locked=False,
+            )
+            db.add(match_record)
+            db.commit()
+            db.refresh(match_record)
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching candidate found to verify claim.")
+
+    # 3-Attempt Limit & Lockout
+    current_attempts = match_record.verification_attempts or 0
+    if getattr(match_record, "is_locked", False) or current_attempts >= 3:
+        match_record.is_locked = True
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Verification locked: Exceeded maximum allowed attempts (3). Flagged for administrative review.",
+        )
+
+    # Retrieve ground truth
+    ground_truth = item.private_challenge_truth or (counterpart.private_challenge_truth if counterpart else None)
+    if not ground_truth and counterpart and counterpart.private_detail_encrypted:
+        try:
+            ground_truth = decrypt_detail(counterpart.private_detail_encrypted)
+        except Exception:
+            pass
+    if not ground_truth and item.private_detail_encrypted:
+        try:
+            ground_truth = decrypt_detail(item.private_detail_encrypted)
+        except Exception:
+            pass
+
+    expected_hash = item.proof_primary_hash or (counterpart.proof_primary_hash if counterpart else None)
+
+    attempt_norm = normalize_nfc(challenge_attempt.strip().lower())
+    truth_norm = normalize_nfc((ground_truth or "").strip().lower())
+    attempt_hash = compute_proof_hash(challenge_attempt)
+
+    is_match = False
+    if ground_truth and attempt_norm == truth_norm:
+        is_match = True
+    elif expected_hash and attempt_hash == expected_hash:
+        is_match = True
+    elif ground_truth and truth_norm and (truth_norm in attempt_norm or attempt_norm in truth_norm):
+        is_match = True
+
+    if not is_match:
+        current_attempts += 1
+        match_record.verification_attempts = current_attempts
+        if current_attempts >= 3:
+            match_record.is_locked = True
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail="Verification locked: Exceeded maximum allowed attempts (3). Flagged for administrative review.",
+            )
+        db.commit()
+        remaining = max(0, 3 - current_attempts)
+        return {
+            "verified": False,
+            "status": "failed",
+            "message": "Verification challenge failed. The provided details do not match.",
+            "attempts_remaining": remaining,
+            "handover_id": None,
+            "one_time_handover_code": None,
+        }
+
+    # Verified successfully
+    match_record.is_verified = True
+    match_record.verification_attempts = current_attempts
+    raw_code = f"{secrets.randbelow(900000) + 100000}"
+    code_hash = get_password_hash(raw_code)
+
+    handover = db.query(Handover).filter(Handover.match_id == match_record.id).first()
+    if handover:
+        handover.handover_code_hash = code_hash
+        handover.status = "open"
+        handover.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    else:
+        handover = Handover(
+            id=uuid.uuid4(),
+            match_id=match_record.id,
+            handover_code_hash=code_hash,
+            status="open",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            owner_confirmed=False,
+            finder_confirmed=False,
+        )
+        db.add(handover)
+
+    db.commit()
+    db.refresh(handover)
+
+    log_audit_event(
+        db,
+        entity_type="item",
+        entity_id=item.id,
+        action="claim_verified_success",
+        severity="info",
+        actor_id=current_user.id,
+        details={"handover_id": str(handover.id)},
+    )
+
+    return {
+        "verified": True,
+        "status": "verified",
+        "message": "Ownership verified successfully! Present this one-time code at the physical handoff.",
+        "attempts_remaining": max(0, 3 - current_attempts),
+        "handover_id": str(handover.id),
+        "one_time_handover_code": raw_code,
+    }
